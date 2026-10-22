@@ -7,6 +7,8 @@
 //   ANTHROPIC_API_KEY   volitelné (console.anthropic.com) – pak se úroveň "complex" (Nejchytřejší) posílá Claudovi
 //   ANTHROPIC_MODEL     volitelné, výchozí claude-sonnet-5-5
 //   FREE_LIMIT          volitelné, dotazů zdarma denně (výchozí 10)
+//   GEMINI_TTS_MODEL    volitelné – model pro přirozený hlas (výchozí gemini-3.8-flash-tts, pak starší)
+//   VOICE_LIMIT         volitelné, kolik kousků hlasu / přepisů řeči denně na zařízení (výchozí 400)
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const cors = {
@@ -26,6 +28,38 @@ const CLAUDE_KEY = env("ANTHROPIC_API_KEY");
 const CLAUDE_MODEL = env("ANTHROPIC_MODEL", "claude-sonnet-5-5");
 const FREE_LIMIT = Number(env("FREE_LIMIT", "10"));
 const UI_LIMIT = 60; // překlady rozhraní: dávek denně na zařízení
+const VOICE_LIMIT = Number(env("VOICE_LIMIT", "400")); // hlas a přepis řeči
+const TTS_MODELS = [env("GEMINI_TTS_MODEL"), "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"].filter(Boolean);
+const VOICES = new Set(["Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"]);
+let goodTts = ""; let ttsShape = 0;
+
+// přirozený hlas (Gemini TTS): vrací WAV nebo syrové PCM v base64
+async function tts(text: string, voice: string) {
+  if (!GEMINI_KEY) throw new Error("no_gemini");
+  const v = VOICES.has(voice) ? voice : "Kore";
+  // nové API má speechConfig.voiceConfig.voice, starší prebuiltVoiceConfig.voiceName – zkusí se obojí
+  const shapes = [{ voiceConfig: { voice: v } }, { voiceConfig: { prebuiltVoiceConfig: { voiceName: v } } }];
+  let lastErr = "";
+  const models = goodTts ? [goodTts, ...TTS_MODELS.filter((m) => m !== goodTts)] : TTS_MODELS;
+  for (const model of models) {
+    for (const k of [ttsShape, 1 - ttsShape]) {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: shapes[k] } }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 404) { lastErr = `tts ${model}: 404`; break; }
+      if (r.status === 400) { lastErr = `tts ${model}: ${(d.error && d.error.message) || 400}`; if (/model|not found|not supported/i.test(lastErr) && !/voice/i.test(lastErr)) break; continue; }
+      if (!r.ok) { lastErr = `tts ${model} ${r.status}: ${(d.error && d.error.message) || ""}`; break; } // přetížené / chyba → další model
+      const part = (d.candidates?.[0]?.content?.parts ?? []).find((p: { inlineData?: unknown; inline_data?: unknown }) => p.inlineData || p.inline_data);
+      const inl = part && (part.inlineData || part.inline_data);
+      if (!inl?.data) { lastErr = `tts ${model}: no audio`; continue; }
+      goodTts = model; ttsShape = k;
+      return { audio: inl.data as string, mime: (inl.mimeType || inl.mime_type || "audio/L16;rate=24000") as string };
+    }
+  }
+  throw new Error("no TTS model available (" + lastErr + ")");
+}
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Img = { mime: string; data: string };
@@ -90,12 +124,19 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ code: "bad_request" }, 405);
 
-  let body: { messages?: Msg[]; images?: Img[]; tier?: string; json?: boolean; purpose?: string };
+  let body: { messages?: Msg[]; images?: Img[]; audio?: Img; tier?: string; json?: boolean; purpose?: string; text?: string; voice?: string };
   try { body = await req.json(); } catch { return json({ code: "bad_request" }, 400); }
-  const messages = (body.messages ?? []).filter((m) => m && typeof m.content === "string").slice(-12)
+  const isTts = body.purpose === "tts";
+  const messages = (isTts ? [{ role: "user", content: String(body.text || "") }] : (body.messages ?? [])).filter((m) => m && typeof m.content === "string").slice(-12)
     .map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content.slice(0, 200_000) })) as Msg[];
   if (!messages.length || messages[messages.length - 1].role !== "user") return json({ code: "bad_request" }, 400);
   const images = (body.images ?? []).slice(0, 4).filter((i) => i && i.data && i.data.length < 8_000_000);
+  // nahraná řeč (WAV) jde Gemini stejně jako obrázek
+  const audio = body.audio && body.audio.data && body.audio.data.length < 12_000_000 ? body.audio : null;
+  if (audio) images.push(audio);
+  const isStt = body.purpose === "stt";
+  // přepis řeči: jen jedna zpráva a jen zvuk (ať se přes něj neobchází limit dotazů)
+  if (isStt && (!audio || images.length !== 1 || messages.length !== 1)) return json({ code: "bad_request" }, 400);
   const tier = body.tier ?? "default";
   const wantJson = !!body.json;
   const isUi = body.purpose === "ui";
@@ -113,14 +154,29 @@ Deno.serve(async (req) => {
       plus = p?.plan === "plus" && (!p.plan_until || new Date(p.plan_until) > new Date());
     }
   }
-  if (!plus || isUi) {
+  if (isTts || isStt) {
+    // hlas a přepis řeči mají vlastní (velkorysý) limit a nepočítají se do dotazů
+    const { data: n, error } = await sb.rpc("bump_usage", { p_k: "voice:" + key });
+    if (!error && typeof n === "number" && n > VOICE_LIMIT * (plus ? 3 : 1)) return json({ code: "usage" }, 429);
+  } else if (!plus || isUi) {
     const { data: n, error } = await sb.rpc("bump_usage", { p_k: (isUi ? "ui:" : "") + key });
     if (!error && typeof n === "number" && n > (isUi ? UI_LIMIT : FREE_LIMIT)) return json({ code: "usage" }, 429);
   }
+  if (isTts) {
+    const text = messages[0].content.trim().slice(0, 1500);
+    if (!text) return json({ code: "bad_request" }, 400);
+    try { return json(await tts(text, String(body.voice || ""))); }
+    catch (e) {
+      const m = String((e as Error).message || e); console.error(m);
+      return json({ code: "unavailable", detail: !GEMINI_KEY ? "GEMINI_API_KEY is missing in Supabase → Edge Functions → Secrets" : m.slice(0, 300) }, 502);
+    }
+  }
 
   // automatické směrování: nejtěžší úlohy Claude (když je klíč), jinak Gemini; při chybě druhý poskytovatel
-  const maxTokens = isUi ? 4000 : tier === "quick" ? 1500 : 4000;
-  const order = tier === "complex" && plus && CLAUDE_KEY ? [claude, gemini] : [gemini, claude];
+  // nové modely Gemini „přemýšlí“ a to se počítá do limitu – proto velkorysý strop (platí se jen za skutečně použité)
+  const maxTokens = isStt ? 4000 : 8192;
+  // zvuk umí jen Gemini
+  const order = audio ? [gemini] : tier === "complex" && plus && CLAUDE_KEY ? [claude, gemini] : [gemini, claude];
   let lastErr = "";
   for (const fn of order) {
     try {

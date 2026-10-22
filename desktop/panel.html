@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <title>Loopnote</title>
 <style>
-  :root{--bg:#fbfaf6;--ink:#1d2321;--mute:#66706c;--line:#e3e1d9;--acc:#0f7c6b;--acc2:#e7f3f0;--card:#fff}
+  :root{--bg:#fbfaf6;--ink:#1d2321;--mute:#66706c;--line:#e3e1d9;--acc:#0f7c6b;--acc2:#e7f3f0;--card:#fff;--red:#c0392b}
   @media (prefers-color-scheme:dark){:root{--bg:#1b1f1e;--ink:#eef1ef;--mute:#9aa5a1;--line:#2f3533;--acc:#3fb39f;--acc2:#20302c;--card:#232827}}
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-  body{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:0}
+  body{display:flex;flex-direction:column;border:1px solid var(--line)}
   header{-webkit-app-region:drag;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 14px;border-bottom:1px solid var(--line);user-select:none}
   header b{font-weight:700;letter-spacing:.2px}
   header .dot{width:18px;height:18px;border-radius:50%;border:2.5px solid #e03131}
@@ -18,16 +18,26 @@
   .ib:hover{background:var(--acc2);color:var(--ink)}
   main{flex:1;overflow:auto;padding:12px 14px}
   .thumb{display:block;max-width:100%;max-height:110px;border-radius:8px;border:1px solid var(--line);margin:0 auto 12px;object-fit:contain;background:var(--card)}
+  .thumb[hidden]{display:none}
   .msg{margin:0 0 12px}
   .msg p{margin:0 0 8px}
   .msg ul{margin:0 0 8px;padding-left:20px}
   .q{background:var(--acc2);border-radius:10px;padding:6px 10px;margin:0 0 10px auto;width:fit-content;max-width:85%}
-  .think{color:var(--mute);display:flex;gap:8px;align-items:center}
+  .think{color:var(--mute);display:flex;gap:8px;align-items:center;margin:0 0 10px}
   .think i{width:8px;height:8px;border-radius:50%;background:var(--acc);animation:p 1s infinite alternate}
   .think i:nth-child(2){animation-delay:.2s}.think i:nth-child(3){animation-delay:.4s}
   @keyframes p{from{opacity:.25}to{opacity:1}}
-  .err{color:#c0392b}
+  .err{color:var(--red)}
+  .act{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:10px;padding:6px 8px 6px 10px;margin:-4px 0 12px;font-size:13px}
+  .act span{flex:1}
+  .act button{border:0;background:var(--acc2);color:var(--ink);border-radius:8px;padding:4px 8px;font:600 12px system-ui,sans-serif;cursor:pointer}
+  .hello{color:var(--mute);margin:0 0 12px}
   footer{border-top:1px solid var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+  .talk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
+  .talk[hidden]{display:none}
+  .talk .lv{width:12px;height:12px;border-radius:50%;background:var(--red);transform:scale(calc(1 + var(--lv,0)));transition:transform .08s}
+  .talk.thinking .lv,.talk.heard .lv{background:#6b46c1;animation:p 1s infinite alternate}
+  .talk.speaking .lv{background:#2357c6}
   form{display:flex;gap:6px}
   input{flex:1;min-width:0;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:8px 10px;font:inherit}
   input:focus{outline:2px solid var(--acc);border-color:transparent}
@@ -36,39 +46,46 @@
   .btn:hover{border-color:var(--acc)}
   .btn.pri{background:var(--acc);border-color:var(--acc);color:#fff;margin-left:auto}
   .btn:disabled{opacity:.5;cursor:default}
+  #mic{width:40px;padding:0;display:grid;place-items:center}
+  #mic svg{width:18px;height:18px}
+  #mic.on{background:var(--red);border-color:var(--red);color:#fff}
 </style>
 </head>
 <body>
 <header><span class="dot"></span><b>Loopnote</b><span class="sp"></span>
-  <button class="ib" id="again" title="">↺</button><button class="ib" id="x" title="">✕</button></header>
-<main id="m"><img class="thumb" id="th" alt=""></main>
+  <button class="ib" id="again">↺</button><button class="ib" id="x">✕</button></header>
+<main id="m"><img class="thumb" id="th" alt="" hidden></main>
 <footer>
-  <form id="f"><input id="in" autocomplete="off"><button class="btn" id="send">→</button></form>
+  <div class="talk" id="talk" hidden><span class="lv"></span><span id="talkT"></span></div>
+  <form id="f"><button type="button" class="btn" id="mic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg></button><input id="in" autocomplete="off"><button class="btn" id="send">→</button></form>
   <div class="row"><button class="btn" id="say"></button><button class="btn pri" id="save"></button></div>
 </footer>
 <script>
+  // 0 přemýšlím, 1 placeholder, 2 přečíst, 3 zastavit, 4 uložit, 5 zavřít, 6 znovu, 7 chyba, 8 bez odpovědi,
+  // 9 poslouchám, 10 mluvím, 11 mluvit, 12 otevřít, 13 úvod bez obrázku
   const S = {
-    en:["Thinking…","Ask a follow-up…","🔊 Read aloud","■ Stop","Save to notebook","Close","Circle again","Something went wrong. Try again.","No answer – is the internet on?"],
-    cs:["Přemýšlím…","Doptej se…","🔊 Přečíst","■ Zastavit","Uložit do sešitu","Zavřít","Zakroužkovat znovu","Něco se pokazilo. Zkus to znovu.","Žádná odpověď – jsi připojený k internetu?"],
-    sk:["Rozmýšľam…","Dopýtaj sa…","🔊 Prečítať","■ Zastaviť","Uložiť do zošita","Zavrieť","Zakrúžkovať znova","Niečo sa pokazilo. Skús to znova.","Žiadna odpoveď – si pripojený na internet?"],
-    pl:["Myślę…","Dopytaj…","🔊 Przeczytaj","■ Zatrzymaj","Zapisz w zeszycie","Zamknij","Zakreśl ponownie","Coś poszło nie tak. Spróbuj ponownie.","Brak odpowiedzi – czy masz internet?"],
-    de:["Ich denke nach…","Nachfragen…","🔊 Vorlesen","■ Stopp","Im Heft speichern","Schließen","Neu einkreisen","Etwas ist schiefgelaufen. Versuch es noch mal.","Keine Antwort – bist du online?"],
-    fr:["Je réfléchis…","Pose une autre question…","🔊 Lire à voix haute","■ Arrêter","Enregistrer dans le cahier","Fermer","Entourer à nouveau","Un problème est survenu. Réessaie.","Pas de réponse – es-tu connecté ?"],
-    es:["Pensando…","Pregunta algo más…","🔊 Leer en voz alta","■ Parar","Guardar en el cuaderno","Cerrar","Rodear de nuevo","Algo salió mal. Inténtalo de nuevo.","Sin respuesta: ¿tienes internet?"],
-    it:["Sto pensando…","Fai un'altra domanda…","🔊 Leggi ad alta voce","■ Ferma","Salva nel quaderno","Chiudi","Cerchia di nuovo","Qualcosa è andato storto. Riprova.","Nessuna risposta: sei connesso?"],
-    pt:["A pensar…","Pergunta mais…","🔊 Ler em voz alta","■ Parar","Guardar no caderno","Fechar","Circular de novo","Algo correu mal. Tenta de novo.","Sem resposta – tens internet?"],
-    uk:["Думаю…","Запитай ще…","🔊 Прочитати","■ Зупинити","Зберегти в зошит","Закрити","Обвести знову","Щось пішло не так. Спробуй ще раз.","Немає відповіді – чи є інтернет?"],
-    hu:["Gondolkodom…","Kérdezz még…","🔊 Felolvasás","■ Leállítás","Mentés a füzetbe","Bezárás","Új karikázás","Valami hiba történt. Próbáld újra.","Nincs válasz – van internet?"],
-    nl:["Even denken…","Stel een vervolgvraag…","🔊 Voorlezen","■ Stop","Opslaan in schrift","Sluiten","Opnieuw omcirkelen","Er ging iets mis. Probeer het opnieuw.","Geen antwoord – ben je online?"],
+    en:["Thinking…","Ask or say anything…","🔊 Read aloud","■ Stop","Save to notebook","Close","Circle again","Something went wrong. Try again.","No answer – is the internet on?","Listening… go ahead","Speaking… click the mic to interrupt","Talk","Open","Hi! Ask me anything – I can explain, write into your notebooks, add things to your calendar or set a timer."],
+    cs:["Přemýšlím…","Zeptej se nebo řekni cokoli…","🔊 Přečíst","■ Zastavit","Uložit do sešitu","Zavřít","Zakroužkovat znovu","Něco se pokazilo. Zkus to znovu.","Žádná odpověď – jsi připojený k internetu?","Poslouchám… mluv","Mluvím… klikni na mikrofon a skoč mi do řeči","Mluvit","Otevřít","Ahoj! Ptej se na cokoli – vysvětlím, zapíšu ti to do sešitu, do kalendáře nebo nastavím minutku."],
+    sk:["Rozmýšľam…","Opýtaj sa alebo povedz čokoľvek…","🔊 Prečítať","■ Zastaviť","Uložiť do zošita","Zavrieť","Zakrúžkovať znova","Niečo sa pokazilo. Skús to znova.","Žiadna odpoveď – si pripojený na internet?","Počúvam… hovor","Hovorím… klikni na mikrofón a skoč mi do reči","Hovoriť","Otvoriť","Ahoj! Pýtaj sa na čokoľvek – vysvetlím, zapíšem do zošita, do kalendára alebo nastavím minútku."],
+    pl:["Myślę…","Zapytaj lub powiedz coś…","🔊 Przeczytaj","■ Zatrzymaj","Zapisz w zeszycie","Zamknij","Zakreśl ponownie","Coś poszło nie tak. Spróbuj ponownie.","Brak odpowiedzi – czy masz internet?","Słucham… mów","Mówię… kliknij mikrofon, aby przerwać","Mów","Otwórz","Cześć! Pytaj o wszystko – wyjaśnię, zapiszę w zeszycie, w kalendarzu albo ustawię minutnik."],
+    de:["Ich denke nach…","Frag oder sag etwas…","🔊 Vorlesen","■ Stopp","Im Heft speichern","Schließen","Neu einkreisen","Etwas ist schiefgelaufen. Versuch es noch mal.","Keine Antwort – bist du online?","Ich höre zu… sprich","Ich spreche… klick aufs Mikro, um zu unterbrechen","Sprechen","Öffnen","Hi! Frag mich alles – ich erkläre, schreibe in dein Heft, trage Termine ein oder stelle einen Timer."],
+    fr:["Je réfléchis…","Demande ou dis quelque chose…","🔊 Lire à voix haute","■ Arrêter","Enregistrer dans le cahier","Fermer","Entourer à nouveau","Un problème est survenu. Réessaie.","Pas de réponse – es-tu connecté ?","Je t'écoute… parle","Je parle… clique sur le micro pour m'interrompre","Parler","Ouvrir","Salut ! Demande-moi tout – j'explique, j'écris dans tes cahiers, j'ajoute au calendrier ou je lance un minuteur."],
+    es:["Pensando…","Pregunta o di algo…","🔊 Leer en voz alta","■ Parar","Guardar en el cuaderno","Cerrar","Rodear de nuevo","Algo salió mal. Inténtalo de nuevo.","Sin respuesta: ¿tienes internet?","Te escucho… habla","Hablando… pulsa el micro para interrumpir","Hablar","Abrir","¡Hola! Pregúntame lo que quieras: explico, escribo en tus cuadernos, apunto en el calendario o pongo un temporizador."],
+    it:["Sto pensando…","Chiedi o di' qualcosa…","🔊 Leggi ad alta voce","■ Ferma","Salva nel quaderno","Chiudi","Cerchia di nuovo","Qualcosa è andato storto. Riprova.","Nessuna risposta: sei connesso?","Ti ascolto… parla","Sto parlando… clicca il microfono per interrompere","Parla","Apri","Ciao! Chiedimi qualsiasi cosa: spiego, scrivo nei quaderni, aggiungo al calendario o imposto un timer."],
+    pt:["A pensar…","Pergunta ou diz algo…","🔊 Ler em voz alta","■ Parar","Guardar no caderno","Fechar","Circular de novo","Algo correu mal. Tenta de novo.","Sem resposta – tens internet?","Estou a ouvir… fala","A falar… clica no micro para interromper","Falar","Abrir","Olá! Pergunta o que quiseres – explico, escrevo nos cadernos, ponho no calendário ou ativo um temporizador."],
+    uk:["Думаю…","Запитай або скажи щось…","🔊 Прочитати","■ Зупинити","Зберегти в зошит","Закрити","Обвести знову","Щось пішло не так. Спробуй ще раз.","Немає відповіді – чи є інтернет?","Слухаю… говори","Говорю… натисни мікрофон, щоб перебити","Говорити","Відкрити","Привіт! Питай що завгодно – поясню, запишу в зошит, у календар або поставлю таймер."],
+    hu:["Gondolkodom…","Kérdezz vagy mondj valamit…","🔊 Felolvasás","■ Leállítás","Mentés a füzetbe","Bezárás","Új karikázás","Valami hiba történt. Próbáld újra.","Nincs válasz – van internet?","Hallgatlak… beszélj","Beszélek… kattints a mikrofonra a félbeszakításhoz","Beszéd","Megnyitás","Szia! Kérdezz bármit – elmagyarázom, beírom a füzetbe, a naptárba, vagy beállítok egy időzítőt."],
+    nl:["Even denken…","Vraag of zeg iets…","🔊 Voorlezen","■ Stop","Opslaan in schrift","Sluiten","Opnieuw omcirkelen","Er ging iets mis. Probeer het opnieuw.","Geen antwoord – ben je online?","Ik luister… zeg het maar","Ik praat… klik op de microfoon om te onderbreken","Praten","Openen","Hoi! Vraag me alles – ik leg uit, schrijf in je schriften, zet het in je agenda of start een timer."],
   };
   const qs = new URLSearchParams(location.search);
-  let ui = qs.get("ui") || "en", loc = qs.get("loc") || "en-US";
-  let t = S[ui] || S.en;
+  let ui = qs.get("ui") || "en", t = S[ui] || S.en;
   const api = window.loopnoteDesktop, $ = (id) => document.getElementById(id), m = $("m");
-  let url = "", hist = [], answers = [], waiting = 0, speaking = false;
+  let url = "", hist = [], answers = [], waiting = null, speaking = false, talkOn = false, talkSid = 0, talkState = "";
   function labels() {
     $("in").placeholder = t[1]; $("say").textContent = speaking ? t[3] : t[2]; $("save").textContent = t[4];
-    $("x").title = t[5]; $("again").title = t[6];
+    $("x").title = t[5]; $("again").title = t[6]; $("mic").title = t[11];
+    const T = { listening: t[9], thinking: t[0], heard: t[0], speaking: t[10] };
+    $("talkT").textContent = T[talkState] || "";
   }
   labels();
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -84,46 +101,71 @@
     }
     return out + (list ? "</ul>" : "");
   }
-  function thinking() { const d = document.createElement("div"); d.className = "think"; d.innerHTML = "<i></i><i></i><i></i><span>" + esc(t[0]) + "</span>"; m.appendChild(d); m.scrollTop = m.scrollHeight; return d; }
-  function ask(q) {
-    const el = thinking(); waiting = el;
-    $("send").disabled = true;
-    api.ask({ url, q: q || "", history: hist.slice() });
+  const scroll = () => { m.scrollTop = m.scrollHeight; };
+  function thinking() { if (waiting) return; const d = document.createElement("div"); d.className = "think"; d.innerHTML = "<i></i><i></i><i></i><span>" + esc(t[0]) + "</span>"; m.appendChild(d); waiting = d; scroll(); }
+  function unthink() { if (waiting) { waiting.remove(); waiting = null; } }
+  function addQ(q) { const d = document.createElement("div"); d.className = "q"; d.textContent = q; m.appendChild(d); scroll(); }
+  function addAnswer(text, acts) {
+    if (text) { const d = document.createElement("div"); d.className = "msg"; d.innerHTML = md(text); m.appendChild(d); }
+    for (const a of acts || []) {
+      const c = document.createElement("div"); c.className = "act";
+      c.innerHTML = "<span>" + (a.k === "note" ? "📝 " : a.k === "cal" ? "📅 " : "⏱ ") + esc(a.t) + "</span>" + (a.k === "note" ? '<button type="button">' + esc(t[12]) + "</button>" : "");
+      if (a.k === "note") c.querySelector("button").onclick = () => api.openNb({ nbId: a.nbId, pi: a.pi });
+      m.appendChild(c);
+    }
+    if (text) answers.push(text); scroll();
   }
-  api.onPanelInit((d) => { url = d.url; $("th").src = url; ask(""); });
+  function addErr(msg) { const d = document.createElement("div"); d.className = "msg"; d.innerHTML = '<p class="err">' + esc(msg) + "</p>"; m.appendChild(d); scroll(); }
+  function ask(q) { thinking(); $("send").disabled = true; api.ask({ url, q: q || "", history: hist.slice() }); }
+  function setUi(r) { if (r && r.ui && S[r.ui] && r.ui !== ui) { ui = r.ui; t = S[ui]; labels(); } }
+
+  api.onPanelInit((d) => {
+    url = d.url || ""; setUi(d);
+    if (url) { $("th").src = url; $("th").hidden = false; ask(""); }
+    else { $("save").hidden = true; $("again").hidden = true; const h = document.createElement("p"); h.className = "hello"; h.textContent = t[13]; m.appendChild(h); }
+    if (d.talk) startTalk();
+  });
   api.onAnswer((r) => {
-    if (r.ui && S[r.ui] && r.ui !== ui) { ui = r.ui; t = S[ui]; labels(); }
-    if (r.lang) loc = r.lang;
-    if (waiting) { waiting.remove(); waiting = 0; }
-    $("send").disabled = false;
-    const d = document.createElement("div"); d.className = "msg";
-    if (r.err || !r.text) { d.innerHTML = '<p class="err">' + esc(r.err === "timeout" ? t[8] : (r.err || t[7])) + "</p>"; }
-    else { d.innerHTML = md(r.text); hist.push({ role: "assistant", content: r.text }); answers.push(r.text); }
-    m.appendChild(d); m.scrollTop = m.scrollHeight;
+    setUi(r); unthink(); $("send").disabled = false;
+    const acts = r.acts || [];
+    if (r.err || (!r.text && !acts.length)) addErr(r.err === "timeout" ? t[8] : (r.err || t[7]));
+    else { addAnswer(r.text || "", acts); hist.push({ role: "assistant", content: r.text || acts.map((a) => a.t).join("\n") }); if (r.autoRead && r.text && !talkOn) api.speak({ text: r.text }); }
     $("in").focus();
   });
   $("f").addEventListener("submit", (e) => {
     e.preventDefault(); const q = $("in").value.trim(); if (!q || waiting) return;
-    $("in").value = ""; const d = document.createElement("div"); d.className = "q"; d.textContent = q; m.appendChild(d);
-    ask(q); hist.push({ role: "user", content: q });
+    if (talkOn) stopTalk();
+    $("in").value = ""; addQ(q); ask(q); hist.push({ role: "user", content: q });
   });
-  // čtení nahlas v jazyce z nastavení appky
-  function voiceFor(l) {
-    const vs = speechSynthesis.getVoices(), base = l.slice(0, 2).toLowerCase();
-    return vs.find((v) => v.lang.toLowerCase() === l.toLowerCase()) || vs.find((v) => v.lang.slice(0, 2).toLowerCase() === base) || null;
-  }
+
+  // rozhovor hlasem – poslech, přepis, odpověď i hlas řeší appka (přirozený hlas Gemini)
+  function startTalk() { talkOn = true; talkSid = Date.now(); $("mic").classList.add("on"); api.talk({ on: true, sid: talkSid, url, history: hist.slice() }); }
+  function stopTalk() { talkOn = false; $("mic").classList.remove("on"); talkState = ""; $("talk").hidden = true; unthink(); api.talk({ on: false }); }
+  $("mic").addEventListener("click", () => {
+    if (talkOn && talkState === "speaking") { api.speak(null); return; } // skočit do řeči: přestane mluvit a hned poslouchá
+    if (talkOn) stopTalk(); else startTalk();
+  });
+  api.onTalkEvent((e) => {
+    if (e.type === "speaking") { speaking = !!e.on; labels(); return; }
+    if (e.sid !== talkSid) return;
+    if (e.type === "level") { $("talk").style.setProperty("--lv", Math.min(1, (e.x || 0) * 14).toFixed(2)); return; }
+    if (e.type === "answer") { unthink(); addAnswer(e.text || "", e.acts); hist.push({ role: "user", content: e.q }, { role: "assistant", content: e.text || (e.acts || []).map((a) => a.t).join("\n") }); return; }
+    if (e.type === "state") {
+      talkState = e.st; const box = $("talk"); box.className = "talk " + e.st; box.hidden = !talkOn || e.st === "off" || e.st === "error"; labels();
+      if (e.st === "heard") { addQ(e.x); thinking(); }
+      if (e.st === "error") { unthink(); addErr(e.x || t[7]); }
+      if (e.st === "off" || e.st === "error") { talkOn = false; $("mic").classList.remove("on"); talkState = ""; }
+    }
+  });
   $("say").addEventListener("click", () => {
-    if (speaking) { speechSynthesis.cancel(); speaking = false; labels(); return; }
-    const text = answers[answers.length - 1]; if (!text) return;
-    const u = new SpeechSynthesisUtterance(text.replace(/\*\*/g, "").replace(/^[-•*]\s+/gm, ""));
-    u.lang = loc; const v = voiceFor(loc); if (v) u.voice = v;
-    u.onend = u.onerror = () => { speaking = false; labels(); };
-    speaking = true; labels(); speechSynthesis.speak(u);
+    if (speaking) { api.speak(null); return; }
+    const text = answers[answers.length - 1]; if (text) api.speak({ text });
   });
-  $("save").addEventListener("click", () => { speechSynthesis.cancel(); api.save({ url, text: hist.map((h) => (h.role === "user" ? "**" + h.content + "**" : h.content)).join("\n\n") }); });
-  $("x").addEventListener("click", () => { speechSynthesis.cancel(); api.close(); });
-  $("again").addEventListener("click", () => { speechSynthesis.cancel(); api.again(); });
-  addEventListener("keydown", (e) => { if (e.key === "Escape") { speechSynthesis.cancel(); api.close(); } });
+  const shut = () => { if (talkOn) stopTalk(); api.speak(null); };
+  $("save").addEventListener("click", () => { shut(); api.save({ url, text: hist.map((h) => (h.role === "user" ? "**" + h.content + "**" : h.content)).join("\n\n") }); });
+  $("x").addEventListener("click", () => { shut(); api.close(); });
+  $("again").addEventListener("click", () => { shut(); api.again(); });
+  addEventListener("keydown", (e) => { if (e.key === "Escape") { shut(); api.close(); } });
 </script>
 </body>
 </html>

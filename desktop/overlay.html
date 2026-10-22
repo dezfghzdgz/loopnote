@@ -7,23 +7,26 @@
   /* skoro průhledné: obrazovka pod tím žije dál (video hraje), jen kreslíš kroužek */
   html,body{margin:0;height:100%;overflow:hidden;background:rgba(0,0,0,.012);cursor:crosshair;user-select:none}
   canvas{position:absolute;inset:0;width:100%;height:100%}
-  #hint{position:absolute;left:50%;top:22px;transform:translateX(-50%);background:rgba(15,124,107,.95);color:#fff;font:600 15px system-ui,sans-serif;padding:10px 16px;border-radius:999px;box-shadow:0 10px 24px -10px rgba(0,0,0,.6);pointer-events:none;white-space:nowrap}
+  #hint{position:absolute;left:50%;top:22px;transform:translateX(-50%);background:rgba(15,124,107,.95);color:#fff;font:600 15px system-ui,sans-serif;padding:6px 6px 6px 16px;border-radius:999px;box-shadow:0 10px 24px -10px rgba(0,0,0,.6);white-space:nowrap;display:flex;align-items:center;gap:12px}
+  #talk{border:0;border-radius:999px;background:#fff;color:#0f7c6b;font:700 14px system-ui,sans-serif;padding:6px 12px;cursor:pointer}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hint"></div>
+<div id="hint"><span id="ht"></span><button id="talk" type="button"></button></div>
 <script>
   const T = {
-    en: "Circle what you need help with · Esc = cancel", cs: "Zakroužkuj, s čím chceš pomoct · Esc = zrušit",
+    en: "Circle what you need help with · Esc or right-click = cancel", cs: "Zakroužkuj, s čím chceš pomoct · Esc nebo pravý klik = zrušit",
     sk: "Zakrúžkuj, s čím chceš pomôcť · Esc = zrušiť", pl: "Zakreśl, z czym potrzebujesz pomocy · Esc = anuluj",
     de: "Kreise ein, wobei du Hilfe brauchst · Esc = abbrechen", fr: "Entoure ce qui te pose problème · Échap = annuler",
     es: "Rodea lo que necesitas entender · Esc = cancelar", it: "Cerchia ciò che non ti è chiaro · Esc = annulla",
     pt: "Circula o que precisas de perceber · Esc = cancelar", uk: "Обведи те, з чим потрібна допомога · Esc = скасувати",
     hu: "Karikázd be, amiben segítség kell · Esc = mégse", nl: "Omcirkel waar je hulp bij nodig hebt · Esc = annuleren",
   };
+  const TK = { en: "🎙 Talk instead", cs: "🎙 Radši mluvit", sk: "🎙 Radšej hovoriť", pl: "🎙 Wolę mówić", de: "🎙 Lieber sprechen", fr: "🎙 Plutôt parler", es: "🎙 Mejor hablar", it: "🎙 Preferisco parlare", pt: "🎙 Prefiro falar", uk: "🎙 Краще говорити", hu: "🎙 Inkább beszélek", nl: "🎙 Liever praten" };
   const ui = new URLSearchParams(location.search).get("ui") || "en";
-  document.getElementById("hint").textContent = T[ui] || T.en;
+  document.getElementById("ht").textContent = T[ui] || T.en;
+  document.getElementById("talk").textContent = TK[ui] || TK.en;
   const api = window.loopnoteDesktop, cv = document.getElementById("c"), ctx = cv.getContext("2d");
   let pts = [], drawing = false;
   function size() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; paint(); }
@@ -53,6 +56,7 @@
     pts = []; paint();
     api.overlayDone({ x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) });
   });
+  document.getElementById("talk").addEventListener("click", () => api.overlayTalk());
   window.__test = (r) => api.overlayDone(r);
 </script>
 </body>

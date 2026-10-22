@@ -1,18 +1,21 @@
 // Loopnote pro počítač: hlavní okno s appkou + jedna plovoucí bublina nad všemi aplikacemi.
 // Klik na bublinu (nebo Ctrl/Cmd+Shift+L) = kroužkuješ přímo na živé obrazovce (nic se nezmrazí).
+// Podržení nebo pravý klik na bublinu (nebo Ctrl/Cmd+Shift+Mezerník) = mluvíš s pomocníkem hlasem.
 // Odpověď vyskočí v malém okénku hned vedle zakroužkovaného místa. Sešit se otevře jen přes „Uložit do sešitu“.
 // Trojklik bublinu schová – vrátí se při dalším otevření Loopnote (ikona, zástupce, lišta u hodin).
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, Tray, Menu, nativeImage } = require("electron");
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, Tray, Menu, nativeImage, session, systemPreferences, Notification } = require("electron");
 const path = require("path");
 
 let win = null, bubble = null, overlay = null, panel = null, tray = null, bubbleOff = false, quitting = false;
-let capDisplay = null, busy = false, lang = { ui: "en", loc: "en-US" }, reqId = 0;
+let capDisplay = null, busy = false, lang = { ui: "en", loc: "en-US" }, reqId = 0, talkWant = 0, overlayTimer = null;
+const ALL_SPACES = { visibleOnFullScreen: true, skipTransformProcessType: true };
 const pending = new Map(); // id -> panel webContents
 const WWW = path.join(__dirname, "www", "index.html");
 const PRELOAD = path.join(__dirname, "preload.js");
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!app.requestSingleInstanceLock()) app.exit(0); // druhé spuštění jen probudí to první
+if (process.platform === "win32") app.setAppUserModelId("app.loopnote.desktop"); // oznámení (minutka, připomínky) ve Windows
 // když appku otevřeš znovu (ikona, zástupce), vrátí se i schovaná bublina
 app.on("second-instance", () => { showBubble(); showMain(); });
 
@@ -27,7 +30,7 @@ function createMain(visible = true) {
   win = new BrowserWindow({
     width: 1280, height: 860, minWidth: 420, minHeight: 500, title: "Loopnote", show: visible,
     icon: path.join(__dirname, "build", "tray.png"), backgroundColor: "#eef1ef", autoHideMenuBar: true,
-    webPreferences: { preload: PRELOAD, contextIsolation: true, backgroundThrottling: false },
+    webPreferences: { preload: PRELOAD, contextIsolation: true, backgroundThrottling: false, autoplayPolicy: "no-user-gesture-required" },
   });
   win.loadFile(WWW);
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: "deny" }; });
@@ -46,15 +49,23 @@ function createBubble() {
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
   bubble.setAlwaysOnTop(true, "screen-saver");
-  bubble.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  bubble.loadFile(path.join(__dirname, "bubble.html"));
+  bubble.setVisibleOnAllWorkspaces(true, ALL_SPACES);
+  bubble.loadFile(path.join(__dirname, "bubble.html"), { query: { ui: lang.ui } });
   bubble.on("closed", () => { bubble = null; });
 }
 
 function showBubble() {
   bubbleOff = false;
   if (!bubble) createBubble();
+  keepBubbleOnScreen();
   bubble.showInactive();
+}
+// po odpojení monitoru nebo přetažení mimo obrazovku vrátit bublinu na viditelné místo
+function keepBubbleOnScreen() {
+  if (!bubble || bubble.isDestroyed()) return;
+  const b = bubble.getBounds(), wa = screen.getDisplayMatching(b).workArea;
+  const x = Math.min(Math.max(b.x, wa.x), wa.x + wa.width - b.width), y = Math.min(Math.max(b.y, wa.y), wa.y + wa.height - b.height);
+  if (x !== b.x || y !== b.y) bubble.setPosition(Math.round(x), Math.round(y));
 }
 
 // 1) kroužkování na živé obrazovce: průhledné okno, pod ním všechno běží dál
@@ -70,18 +81,30 @@ function startCircle() {
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
   overlay.setAlwaysOnTop(true, "screen-saver");
-  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlay.setVisibleOnAllWorkspaces(true, ALL_SPACES);
   overlay.loadFile(path.join(__dirname, "overlay.html"), { query: { ui: lang.ui } });
-  overlay.once("ready-to-show", () => overlay && overlay.focus());
-  overlay.on("closed", () => { overlay = null; });
+  overlay.once("ready-to-show", () => { if (overlay) { overlay.moveTop(); overlay.focus(); } });
+  overlay.webContents.once("did-finish-load", () => { if (overlay) { overlay.moveTop(); overlay.focus(); } });
+  try { globalShortcut.register("Escape", () => { if (overlay) overlay.close(); }); } catch (e) { /* jiná appka ho drží */ }
+  clearTimeout(overlayTimer);
+  overlayTimer = setTimeout(() => { if (overlay) overlay.close(); }, 60000);
+  overlay.on("closed", () => { overlay = null; clearTimeout(overlayTimer); try { globalShortcut.unregister("Escape"); } catch (e) { /* nic */ } });
 }
 
 // 2) výřez: overlay zmizí, vyfotí se jen zakroužkované místo
 async function grab(rect) {
+  if (process.platform === "darwin" && systemPreferences.getMediaAccessStatus("screen") !== "granted") {
+    // bez povolení by se vyfotila jen tapeta; tohle vyvolá systémovou žádost o povolení
+    await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } }).catch(() => {});
+    return null;
+  }
   const disp = capDisplay || screen.getPrimaryDisplay();
   const sf = disp.scaleFactor || 1;
   const size = { width: Math.round(disp.size.width * sf), height: Math.round(disp.size.height * sf) };
-  const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: size });
+  const sources = await Promise.race([
+    desktopCapturer.getSources({ types: ["screen"], thumbnailSize: size }),
+    wait(8000).then(() => { throw new Error("capture timeout"); }),
+  ]);
   const src = sources.find((s) => String(s.display_id) === String(disp.id)) || sources[0];
   if (!src || src.thumbnail.isEmpty()) return null;
   const t = src.thumbnail, ts = t.getSize(), k = ts.width / disp.bounds.width;
@@ -98,8 +121,13 @@ async function grab(rect) {
 }
 
 // 3) okénko s odpovědí hned vedle výřezu
-function openPanel(url, rect) {
-  const disp = capDisplay || screen.getPrimaryDisplay();
+function openPanel(url, rect, talk = false) {
+  if (panel) { const old = panel; panel = null; old.removeAllListeners("closed"); old.close(); stopTalkMain(); }
+  const disp = capDisplay || screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  if (!rect) { // bez kroužku: okénko vedle bubliny
+    const bb = bubble && bubble.isVisible() ? bubble.getBounds() : { x: disp.workArea.x + disp.workArea.width - 100, y: disp.workArea.y + disp.workArea.height - 140, width: 72, height: 72 };
+    rect = { x: bb.x - disp.bounds.x, y: bb.y - disp.bounds.y - 200, w: bb.width, h: bb.height };
+  }
   const wa = disp.workArea, W = 400, H = 470, gap = 14;
   const ax = disp.bounds.x + rect.x, ay = disp.bounds.y + rect.y;
   let x = ax + rect.w + gap;
@@ -114,8 +142,34 @@ function openPanel(url, rect) {
   });
   panel.setAlwaysOnTop(true, "floating");
   panel.loadFile(path.join(__dirname, "panel.html"), { query: { ui: lang.ui, loc: lang.loc } });
-  panel.webContents.once("did-finish-load", () => { if (panel) panel.webContents.send("panel-init", { url }); });
-  panel.on("closed", () => { panel = null; });
+  panel.webContents.once("did-finish-load", () => { if (panel) panel.webContents.send("panel-init", { url, talk, ui: lang.ui }); });
+  const me = panel;
+  panel.on("closed", () => { if (panel !== me) return; panel = null; stopTalkMain(); });
+  panel.focus();
+}
+
+function toMain(ch, data) {
+  if (!win) createMain(false);
+  const send = () => win && !win.isDestroyed() && win.webContents.send(ch, data);
+  if (win.webContents.isLoading()) win.webContents.once("did-finish-load", () => setTimeout(send, 1200)); else send();
+}
+function stopTalkMain() { talkWant = 0; toMain("talk", { on: false }); toMain("speak", null); bubbleState(""); }
+function bubbleState(s) { if (bubble && !bubble.isDestroyed()) bubble.webContents.send("bubble-state", s); }
+// mikrofon pro rozhovor (okna Loopnote si o něj můžou říct)
+function allowMedia() {
+  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(["media", "notifications", "clipboard-read", "clipboard-sanitized-write"].includes(perm)));
+  session.defaultSession.setPermissionCheckHandler((_wc, perm) => ["media", "notifications", "clipboard-read", "clipboard-sanitized-write"].includes(perm));
+}
+async function micOk() {
+  if (process.platform !== "darwin") return true;
+  try { return systemPreferences.getMediaAccessStatus("microphone") === "granted" || await systemPreferences.askForMediaAccess("microphone"); } catch { return true; }
+}
+// rozhovor bez kroužkování: okénko vedle bubliny a rovnou poslouchá
+async function startTalk() {
+  if (overlay) overlay.close();
+  await micOk();
+  capDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  openPanel("", null, true);
 }
 
 function askMain(sender, req) {
@@ -151,6 +205,22 @@ ipcMain.on("overlay-done", async (_e, rect) => {
 });
 
 ipcMain.on("panel-ask", (e, req) => askMain(e.sender, req));
+ipcMain.on("panel-talk", async (_e, req) => {
+  if (!req || !req.on) { talkWant = 0; toMain("talk", { on: false }); return; }
+  talkWant = req.sid;
+  await micOk();
+  if (talkWant !== req.sid || !panel) return; // mezitím vypnuto nebo zavřeno
+  toMain("talk", req);
+});
+ipcMain.on("panel-speak", (_e, req) => toMain("speak", req));
+ipcMain.on("panel-open-nb", (_e, req) => { showMain(); toMain("open-nb", req); });
+ipcMain.on("talk-event", (_e, ev) => {
+  if (panel && !panel.isDestroyed()) panel.webContents.send("talk-event", ev);
+  if (ev && ev.type === "state") bubbleState(["listening", "thinking", "heard", "speaking"].includes(ev.st) ? ev.st : "");
+  if (ev && ev.type === "speaking") bubbleState(ev.on ? "speaking" : "");
+});
+ipcMain.on("overlay-talk", () => { if (overlay) overlay.close(); setTimeout(startTalk, 80); });
+ipcMain.on("bubble-talk", () => startTalk());
 ipcMain.on("explain-result", (_e, res) => {
   if (res && res.ui) lang = { ui: res.ui, loc: res.lang || lang.loc };
   const s = pending.get(res.id);
@@ -167,9 +237,13 @@ ipcMain.on("panel-save", (_e, d) => {
 ipcMain.on("panel-close", () => { if (panel) panel.close(); });
 ipcMain.on("panel-again", () => { if (panel) panel.close(); setTimeout(startCircle, 120); });
 
-ipcMain.on("bubble-move", (_e, dx, dy) => { if (!bubble) return; const [x, y] = bubble.getPosition(); bubble.setPosition(Math.round(x + dx), Math.round(y + dy)); });
+ipcMain.on("bubble-move", (_e, dx, dy) => { if (!bubble) return; const [x, y] = bubble.getPosition(); bubble.setPosition(Math.round(x + dx), Math.round(y + dy)); clearTimeout(bubble._kt); bubble._kt = setTimeout(keepBubbleOnScreen, 400); });
 ipcMain.on("bubble-click", () => startCircle());
-ipcMain.on("bubble-off", () => { bubbleOff = true; if (bubble) bubble.hide(); });
+ipcMain.on("bubble-off", () => {
+  bubbleOff = true; if (bubble) bubble.hide();
+  const cs = lang.ui === "cs";
+  try { new Notification({ title: "Loopnote", body: cs ? "Bublina je schovaná. Vrátí se, když znovu otevřeš Loopnote (ikona u hodin)." : "Bubble hidden. It comes back when you open Loopnote again (icon near the clock)." }).show(); } catch (e) { /* nic */ }
+});
 
 function createTray() {
   const img = nativeImage.createFromPath(path.join(__dirname, "build", "tray.png")).resize({ width: 18, height: 18 });
@@ -178,6 +252,7 @@ function createTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Open Loopnote", click: () => { showBubble(); showMain(); } },
     { label: "Circle on screen (Ctrl+Shift+L)", click: () => startCircle() },
+    { label: "Talk (Ctrl+Shift+Space)", click: () => startTalk() },
     { label: "Show bubble", click: showBubble },
     { type: "separator" },
     { label: "Quit", click: () => { quitting = true; app.quit(); } },
@@ -186,12 +261,16 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  allowMedia();
   createMain(true);
   showBubble();
   createTray();
   globalShortcut.register("CommandOrControl+Shift+L", () => startCircle());
+  try { globalShortcut.register("CommandOrControl+Shift+Space", () => startTalk()); } catch (e) { console.error(e); }
   app.on("activate", () => { showBubble(); showMain(); });
-  if (process.env.LOOPNOTE_TEST_HOOK) require(process.env.LOOPNOTE_TEST_HOOK)({ startCircle, get win() { return win; }, get panel() { return panel; }, get overlay() { return overlay; }, get bubble() { return bubble; } });
+  screen.on("display-removed", keepBubbleOnScreen);
+  screen.on("display-metrics-changed", keepBubbleOnScreen);
+  if (process.env.LOOPNOTE_TEST_HOOK) require(process.env.LOOPNOTE_TEST_HOOK)({ startCircle, startTalk, get win() { return win; }, get panel() { return panel; }, get overlay() { return overlay; }, get bubble() { return bubble; } });
 });
 app.on("before-quit", () => { quitting = true; });
 app.on("will-quit", () => globalShortcut.unregisterAll());

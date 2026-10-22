@@ -48,6 +48,10 @@
       ],
       "icon": "build/icon.png",
       "category": "public.app-category.education",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Loopnote listens when you talk to your helper.",
+        "NSScreenCaptureUsageDescription": "Loopnote looks at the part of the screen you circle."
+      },
       "artifactName": "Loopnote-mac.${ext}"
     },
     "linux": {

@@ -89,7 +89,13 @@ Appky sestaví GitHub sám – nic neinstaluješ.
 - Mac: pravý klik na appku → Otevřít. Pro bublinu povol Nastavení → Soukromí → **Nahrávání obrazovky**.
 - iPad/iPhone: zatím přes web (Safari → Sdílet → Přidat na plochu). Nativní appka pro iOS potřebuje Mac s Xcode a Apple Developer účet (99 $/rok).
 
-**Bublina na počítači:** jedna, plave nad všemi aplikacemi. Klik nebo **Ctrl+Shift+L** → kroužkuješ přímo na živé obrazovce (video běží dál) → vedle vyskočí okénko s vysvětlením, můžeš se doptat nebo si to nechat přečíst nahlas v jazyce appky. Do sešitu „From screen“ se to uloží jen tlačítkem **Uložit do sešitu**. Přetažením bublinu posuneš, trojklikem schováš – vrátí se, jakmile znovu otevřeš Loopnote (ikona, zástupce nebo lišta u hodin). Zavřením okna appka běží dál v liště.
+**Bublina na počítači:** jedna, plave nad všemi aplikacemi.
+- **Klik** (nebo **Ctrl+Shift+L**) → kroužkuješ přímo na živé obrazovce → vedle vyskočí okénko s vysvětlením.
+- **Podržet / pravý klik** (nebo **Ctrl+Shift+Mezerník**) → mluvíš s pomocníkem hlasem. Odpovídá přirozeným hlasem (Gemini) a pak zase poslouchá. Klik na mikrofon = skočit mu do řeči.
+- Pomocník umí sám zapisovat: „zapiš mi to do matematiky“, „za 3 dny mám test“, „minutka na 15 minut“ → zápis v sešitě, termín v kalendáři, minutka s upozorněním.
+- Přetažením bublinu posuneš, trojklikem schováš – vrátí se, jakmile znovu otevřeš Loopnote. Zavřením okna appka běží dál v liště.
+
+**Hlas:** přirozený hlas jde přes funkci `ai` (Gemini TTS) a nepočítá se do dotazů zdarma (vlastní limit `VOICE_LIMIT`, výchozí 400 kousků denně). V Nastavení → Hlas jde vybrat jeden z 10 hlasů, nebo přepnout na hlas zařízení.
 
 **Přihlášení v nainstalované appce:** kódem z e-mailu. V Supabase → **Authentication → Email Templates → Magic Link** přidej do textu řádek `Kód: {{ .Token }}`. Platba se otevře v prohlížeči a po zaplacení se Plus v appce zapne sám.
 
