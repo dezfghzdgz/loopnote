@@ -214,7 +214,7 @@ footer .wrap{display:flex;gap:18px;flex-wrap:wrap;justify-content:space-between}
         <p class="lead" data-cs="Sešit pro tablet, kam píšeš perem, nahráváš PDF z přednášek a opakuješ si. Když se zasekneš, AI učitel ti poradí – ne opíše.">A tablet notebook for your notes, lecture PDFs and revision. When you get stuck, the AI teacher helps you – it doesn't just give you the answer.</p>
         <div class="cta">
           <a class="btn primary" href="#try" data-cs="Vyzkoušet na tabletu">Try it on a tablet</a>
-          <a class="btn ghost" href="#beta" data-cs="Přidat se do bety">Join the beta</a>
+          <a class="btn ghost" href="#download" data-cs="Stáhnout">Download</a>
         </div>
         <p class="note" data-cs="Zdarma v betě · Android, iPad, počítač · 12 jazyků">Free in beta · Android, iPad, computer · 12 languages</p>
       </div>
@@ -295,11 +295,11 @@ footer .wrap{display:flex;gap:18px;flex-wrap:wrap;justify-content:space-between}
         <h2 data-cs="Na počítač, tablet i mobil.">For your computer, tablet and phone.</h2>
       </div>
       <div class="dl">
-        <a class="dlc" data-dl="Loopnote-Setup.exe" href="#try"><b>Windows</b><span data-cs="Instalačka · s bublinou nad obrazovkou">Installer · with the on-screen bubble</span></a>
-        <a class="dlc" data-dl="Loopnote-mac.dmg" href="#try"><b>Mac</b><span data-cs="DMG · s bublinou nad obrazovkou">DMG · with the on-screen bubble</span></a>
-        <a class="dlc" data-dl="Loopnote-android.apk" href="#try"><b>Android</b><span data-cs="APK pro tablet i mobil">APK for tablet and phone</span></a>
+        <a class="dlc" href="/download/windows"><b>Windows</b><span data-cs="Instalačka · s bublinou nad obrazovkou">Installer · with the on-screen bubble</span></a>
+        <a class="dlc" href="/download/mac"><b>Mac</b><span data-cs="DMG · s bublinou nad obrazovkou">DMG · with the on-screen bubble</span></a>
+        <a class="dlc" href="/download/android"><b>Android</b><span data-cs="APK pro tablet i mobil">APK for tablet and phone</span></a>
         <a class="dlc" href="#try"><b>iPad · iPhone</b><span data-cs="Instalace z webu (níže)">Install from the web (below)</span></a>
-        <a class="dlc" data-dl="Loopnote-linux.AppImage" href="#try"><b>Linux</b><span>AppImage</span></a>
+        <a class="dlc" href="/download/linux"><b>Linux</b><span>AppImage</span></a>
       </div>
       <p class="note" id="dlNote" style="margin-top:14px;font-size:14px;color:var(--ink-2)" data-cs="Beta není podepsaná: Windows → Další informace → Přesto spustit · Mac → pravý klik → Otevřít · Android → povolit instalaci z tohoto zdroje.">The beta isn't signed yet: Windows → More info → Run anyway · Mac → right-click → Open · Android → allow installs from this source.</p>
     </div>
@@ -375,12 +375,10 @@ footer .wrap{display:flex;gap:18px;flex-wrap:wrap;justify-content:space-between}
     const btn=document.getElementById('bSend');btn.disabled=true;
     try{const r=await fetch(CFG.supabaseUrl+'/rest/v1/waitlist',{method:'POST',headers:{'content-type':'application/json',apikey:CFG.anonKey,authorization:'Bearer '+CFG.anonKey,prefer:'return=minimal'},
         body:JSON.stringify({email,level:document.getElementById('bLevel').value,device:document.getElementById('bDevice').value,lang})});
-      if(r.ok||r.status===409){msg.innerHTML=`<p class="ok">${r.status===409?(lang==='en'?'You are already on the list. Thanks!':'Na seznamu už jsi. Díky!'):(lang==='en'?'Done! We will write to you soon.':'Hotovo! Brzy se ti ozveme.')}</p>`;f.reset()}
+      if(r.ok||r.status===409){msg.innerHTML=`<p class="ok">${lang==='en'?'You\'re in! We don\'t send newsletters – your email is only used to sign in.':'Hotovo, jsi v betě! Žádné e-maily ti posílat nebudeme – e-mail slouží jen k přihlášení.'}</p>`;f.reset()}
       else throw 0}
     catch(err){msg.innerHTML=`<p class="err">${lang==='en'?'Sending failed. Check your connection and try again.':'Odeslání se nepovedlo. Zkontroluj připojení a zkus to znovu.'}</p>`}
     finally{btn.disabled=false}});
-  /* odkazy na stažení z GitHub Releases (config.js: githubRepo: "uzivatel/repozitar") */
-  if(CFG.githubRepo)document.querySelectorAll('[data-dl]').forEach(a=>{a.href='https://github.com/'+CFG.githubRepo+'/releases/latest/download/'+a.dataset.dl});
   /* ceny podle místa: eura v Evropě, libry ve Spojeném království, jinde dolary */
   let tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}
   const cur=/^Europe\/(London|Belfast|Guernsey|Isle_of_Man|Jersey)$/.test(tz)?'GBP':/^Europe\//.test(tz)?'EUR':'USD';

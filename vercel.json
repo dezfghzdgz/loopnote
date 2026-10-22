@@ -1,0 +1,54 @@
+{
+  "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/download/windows",
+      "destination": "https://github.com/dezfghzdgz/loopnote-download/releases/latest/download/Loopnote-Setup.exe",
+      "permanent": false
+    },
+    {
+      "source": "/download/mac",
+      "destination": "https://github.com/dezfghzdgz/loopnote-download/releases/latest/download/Loopnote-mac.dmg",
+      "permanent": false
+    },
+    {
+      "source": "/download/android",
+      "destination": "https://github.com/dezfghzdgz/loopnote-download/releases/latest/download/Loopnote-android.apk",
+      "permanent": false
+    },
+    {
+      "source": "/download/linux",
+      "destination": "https://github.com/dezfghzdgz/loopnote-download/releases/latest/download/Loopnote-linux.AppImage",
+      "permanent": false
+    }
+  ],
+  "headers": [
+    {
+      "source": "/app/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/config.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/app/manifest.webmanifest",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        }
+      ]
+    }
+  ]
+}
