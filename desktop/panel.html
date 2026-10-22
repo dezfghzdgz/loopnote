@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loopnote</title>
+<style>
+  :root{--bg:#fbfaf6;--ink:#1d2321;--mute:#66706c;--line:#e3e1d9;--acc:#0f7c6b;--acc2:#e7f3f0;--card:#fff}
+  @media (prefers-color-scheme:dark){:root{--bg:#1b1f1e;--ink:#eef1ef;--mute:#9aa5a1;--line:#2f3533;--acc:#3fb39f;--acc2:#20302c;--card:#232827}}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+  body{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:0}
+  header{-webkit-app-region:drag;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 14px;border-bottom:1px solid var(--line);user-select:none}
+  header b{font-weight:700;letter-spacing:.2px}
+  header .dot{width:18px;height:18px;border-radius:50%;border:2.5px solid #e03131}
+  header .sp{flex:1}
+  header button{-webkit-app-region:no-drag}
+  .ib{border:0;background:none;color:var(--mute);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;display:grid;place-items:center}
+  .ib:hover{background:var(--acc2);color:var(--ink)}
+  main{flex:1;overflow:auto;padding:12px 14px}
+  .thumb{display:block;max-width:100%;max-height:110px;border-radius:8px;border:1px solid var(--line);margin:0 auto 12px;object-fit:contain;background:var(--card)}
+  .msg{margin:0 0 12px}
+  .msg p{margin:0 0 8px}
+  .msg ul{margin:0 0 8px;padding-left:20px}
+  .q{background:var(--acc2);border-radius:10px;padding:6px 10px;margin:0 0 10px auto;width:fit-content;max-width:85%}
+  .think{color:var(--mute);display:flex;gap:8px;align-items:center}
+  .think i{width:8px;height:8px;border-radius:50%;background:var(--acc);animation:p 1s infinite alternate}
+  .think i:nth-child(2){animation-delay:.2s}.think i:nth-child(3){animation-delay:.4s}
+  @keyframes p{from{opacity:.25}to{opacity:1}}
+  .err{color:#c0392b}
+  footer{border-top:1px solid var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+  form{display:flex;gap:6px}
+  input{flex:1;min-width:0;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:8px 10px;font:inherit}
+  input:focus{outline:2px solid var(--acc);border-color:transparent}
+  .row{display:flex;gap:6px}
+  .btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:7px 10px;font:600 13px system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+  .btn:hover{border-color:var(--acc)}
+  .btn.pri{background:var(--acc);border-color:var(--acc);color:#fff;margin-left:auto}
+  .btn:disabled{opacity:.5;cursor:default}
+</style>
+</head>
+<body>
+<header><span class="dot"></span><b>Loopnote</b><span class="sp"></span>
+  <button class="ib" id="again" title="">↺</button><button class="ib" id="x" title="">✕</button></header>
+<main id="m"><img class="thumb" id="th" alt=""></main>
+<footer>
+  <form id="f"><input id="in" autocomplete="off"><button class="btn" id="send">→</button></form>
+  <div class="row"><button class="btn" id="say"></button><button class="btn pri" id="save"></button></div>
+</footer>
+<script>
+  const S = {
+    en:["Thinking…","Ask a follow-up…","🔊 Read aloud","■ Stop","Save to notebook","Close","Circle again","Something went wrong. Try again.","No answer – is the internet on?"],
+    cs:["Přemýšlím…","Doptej se…","🔊 Přečíst","■ Zastavit","Uložit do sešitu","Zavřít","Zakroužkovat znovu","Něco se pokazilo. Zkus to znovu.","Žádná odpověď – jsi připojený k internetu?"],
+    sk:["Rozmýšľam…","Dopýtaj sa…","🔊 Prečítať","■ Zastaviť","Uložiť do zošita","Zavrieť","Zakrúžkovať znova","Niečo sa pokazilo. Skús to znova.","Žiadna odpoveď – si pripojený na internet?"],
+    pl:["Myślę…","Dopytaj…","🔊 Przeczytaj","■ Zatrzymaj","Zapisz w zeszycie","Zamknij","Zakreśl ponownie","Coś poszło nie tak. Spróbuj ponownie.","Brak odpowiedzi – czy masz internet?"],
+    de:["Ich denke nach…","Nachfragen…","🔊 Vorlesen","■ Stopp","Im Heft speichern","Schließen","Neu einkreisen","Etwas ist schiefgelaufen. Versuch es noch mal.","Keine Antwort – bist du online?"],
+    fr:["Je réfléchis…","Pose une autre question…","🔊 Lire à voix haute","■ Arrêter","Enregistrer dans le cahier","Fermer","Entourer à nouveau","Un problème est survenu. Réessaie.","Pas de réponse – es-tu connecté ?"],
+    es:["Pensando…","Pregunta algo más…","🔊 Leer en voz alta","■ Parar","Guardar en el cuaderno","Cerrar","Rodear de nuevo","Algo salió mal. Inténtalo de nuevo.","Sin respuesta: ¿tienes internet?"],
+    it:["Sto pensando…","Fai un'altra domanda…","🔊 Leggi ad alta voce","■ Ferma","Salva nel quaderno","Chiudi","Cerchia di nuovo","Qualcosa è andato storto. Riprova.","Nessuna risposta: sei connesso?"],
+    pt:["A pensar…","Pergunta mais…","🔊 Ler em voz alta","■ Parar","Guardar no caderno","Fechar","Circular de novo","Algo correu mal. Tenta de novo.","Sem resposta – tens internet?"],
+    uk:["Думаю…","Запитай ще…","🔊 Прочитати","■ Зупинити","Зберегти в зошит","Закрити","Обвести знову","Щось пішло не так. Спробуй ще раз.","Немає відповіді – чи є інтернет?"],
+    hu:["Gondolkodom…","Kérdezz még…","🔊 Felolvasás","■ Leállítás","Mentés a füzetbe","Bezárás","Új karikázás","Valami hiba történt. Próbáld újra.","Nincs válasz – van internet?"],
+    nl:["Even denken…","Stel een vervolgvraag…","🔊 Voorlezen","■ Stop","Opslaan in schrift","Sluiten","Opnieuw omcirkelen","Er ging iets mis. Probeer het opnieuw.","Geen antwoord – ben je online?"],
+  };
+  const qs = new URLSearchParams(location.search);
+  let ui = qs.get("ui") || "en", loc = qs.get("loc") || "en-US";
+  let t = S[ui] || S.en;
+  const api = window.loopnoteDesktop, $ = (id) => document.getElementById(id), m = $("m");
+  let url = "", hist = [], answers = [], waiting = 0, speaking = false;
+  function labels() {
+    $("in").placeholder = t[1]; $("say").textContent = speaking ? t[3] : t[2]; $("save").textContent = t[4];
+    $("x").title = t[5]; $("again").title = t[6];
+  }
+  labels();
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function md(text) { // jednoduchý markdown: odstavce, odrážky, **tučně**
+    const inl = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>");
+    let out = "", list = false;
+    for (const raw of String(text).split(/\n/)) {
+      const l = raw.trim();
+      const li = l.match(/^([-•*]|\d+[.)])\s+(.*)$/);
+      if (li) { if (!list) { out += "<ul>"; list = true; } out += "<li>" + inl(li[2]) + "</li>"; continue; }
+      if (list) { out += "</ul>"; list = false; }
+      if (l) out += "<p>" + inl(l.replace(/^#+\s*/, "")) + "</p>";
+    }
+    return out + (list ? "</ul>" : "");
+  }
+  function thinking() { const d = document.createElement("div"); d.className = "think"; d.innerHTML = "<i></i><i></i><i></i><span>" + esc(t[0]) + "</span>"; m.appendChild(d); m.scrollTop = m.scrollHeight; return d; }
+  function ask(q) {
+    const el = thinking(); waiting = el;
+    $("send").disabled = true;
+    api.ask({ url, q: q || "", history: hist.slice() });
+  }
+  api.onPanelInit((d) => { url = d.url; $("th").src = url; ask(""); });
+  api.onAnswer((r) => {
+    if (r.ui && S[r.ui] && r.ui !== ui) { ui = r.ui; t = S[ui]; labels(); }
+    if (r.lang) loc = r.lang;
+    if (waiting) { waiting.remove(); waiting = 0; }
+    $("send").disabled = false;
+    const d = document.createElement("div"); d.className = "msg";
+    if (r.err || !r.text) { d.innerHTML = '<p class="err">' + esc(r.err === "timeout" ? t[8] : (r.err || t[7])) + "</p>"; }
+    else { d.innerHTML = md(r.text); hist.push({ role: "assistant", content: r.text }); answers.push(r.text); }
+    m.appendChild(d); m.scrollTop = m.scrollHeight;
+    $("in").focus();
+  });
+  $("f").addEventListener("submit", (e) => {
+    e.preventDefault(); const q = $("in").value.trim(); if (!q || waiting) return;
+    $("in").value = ""; const d = document.createElement("div"); d.className = "q"; d.textContent = q; m.appendChild(d);
+    ask(q); hist.push({ role: "user", content: q });
+  });
+  // čtení nahlas v jazyce z nastavení appky
+  function voiceFor(l) {
+    const vs = speechSynthesis.getVoices(), base = l.slice(0, 2).toLowerCase();
+    return vs.find((v) => v.lang.toLowerCase() === l.toLowerCase()) || vs.find((v) => v.lang.slice(0, 2).toLowerCase() === base) || null;
+  }
+  $("say").addEventListener("click", () => {
+    if (speaking) { speechSynthesis.cancel(); speaking = false; labels(); return; }
+    const text = answers[answers.length - 1]; if (!text) return;
+    const u = new SpeechSynthesisUtterance(text.replace(/\*\*/g, "").replace(/^[-•*]\s+/gm, ""));
+    u.lang = loc; const v = voiceFor(loc); if (v) u.voice = v;
+    u.onend = u.onerror = () => { speaking = false; labels(); };
+    speaking = true; labels(); speechSynthesis.speak(u);
+  });
+  $("save").addEventListener("click", () => { speechSynthesis.cancel(); api.save({ url, text: hist.map((h) => (h.role === "user" ? "**" + h.content + "**" : h.content)).join("\n\n") }); });
+  $("x").addEventListener("click", () => { speechSynthesis.cancel(); api.close(); });
+  $("again").addEventListener("click", () => { speechSynthesis.cancel(); api.again(); });
+  addEventListener("keydown", (e) => { if (e.key === "Escape") { speechSynthesis.cancel(); api.close(); } });
+</script>
+</body>
+</html>

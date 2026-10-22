@@ -19,7 +19,9 @@ const json = (body: unknown, status = 200) =>
 
 const env = (k: string, d = "") => Deno.env.get(k) ?? d;
 const GEMINI_KEY = env("GEMINI_API_KEY");
-const GEMINI_MODEL = env("GEMINI_MODEL", "gemini-3.6-flash");
+// modely se zkouší popořadě – když některý Google zrovna nemá (404), vezme se další
+const GEMINI_MODELS = [env("GEMINI_MODEL"), "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"].filter(Boolean);
+let goodModel = "";
 const CLAUDE_KEY = env("ANTHROPIC_API_KEY");
 const CLAUDE_MODEL = env("ANTHROPIC_MODEL", "claude-sonnet-5-5");
 const FREE_LIMIT = Number(env("FREE_LIMIT", "10"));
@@ -46,18 +48,23 @@ async function gemini(messages: Msg[], images: Img[], wantJson: boolean, maxToke
     if (i === messages.length - 1) for (const im of images) parts.unshift({ inline_data: { mime_type: im.mime, data: im.data } });
     return { role: m.role === "assistant" ? "model" : "user", parts };
   });
-  const r = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`,
-    { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: maxTokens, ...(wantJson ? { responseMimeType: "application/json" } : {}) } }) },
-  );
-  const d = await r.json();
-  if (!r.ok) throw new Error("gemini_" + r.status + " " + JSON.stringify(d).slice(0, 300));
-  const c = d.candidates?.[0];
-  if (!c || c.finishReason === "SAFETY" || c.finishReason === "PROHIBITED_CONTENT") throw new Error("refused");
-  return (c.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
+  let lastErr = "";
+  for (const model of goodModel ? [goodModel, ...GEMINI_MODELS.filter((m) => m !== goodModel)] : GEMINI_MODELS) {
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
+      { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: maxTokens, ...(wantJson ? { responseMimeType: "application/json" } : {}) } }) },
+    );
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 404 || (r.status === 400 && /model|not found|not supported/i.test(JSON.stringify(d)))) { lastErr = `gemini ${model}: ${r.status}`; continue; }
+    if (!r.ok) throw new Error(`gemini ${model} ${r.status}: ${(d.error && d.error.message) || JSON.stringify(d).slice(0, 200)}`);
+    goodModel = model;
+    const c = d.candidates?.[0];
+    if (!c || c.finishReason === "SAFETY" || c.finishReason === "PROHIBITED_CONTENT") throw new Error("refused");
+    return (c.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
+  }
+  throw new Error("no Gemini model available (" + lastErr + ")");
 }
-
 async function claude(messages: Msg[], images: Img[], wantJson: boolean, maxTokens: number) {
   if (!CLAUDE_KEY) throw new Error("no_claude");
   const msgs = messages.map((m, i) => {
@@ -129,5 +136,6 @@ Deno.serve(async (req) => {
       console.error(lastErr);
     }
   }
-  return json({ code: lastErr === "invalid_json" ? "invalid_json" : "unavailable" }, 502);
+  const detail = !GEMINI_KEY ? "GEMINI_API_KEY is missing in Supabase → Edge Functions → Secrets" : lastErr.slice(0, 300);
+  return json({ code: lastErr === "invalid_json" ? "invalid_json" : "unavailable", detail }, 502);
 });

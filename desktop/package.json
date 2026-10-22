@@ -23,6 +23,7 @@
       "preload.js",
       "bubble.html",
       "overlay.html",
+      "panel.html",
       "build/tray.png",
       "www/**/*"
     ],

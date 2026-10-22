@@ -518,7 +518,7 @@ div.qopt{cursor:default}.recall-tag{display:inline-block;font-size:11.5px;font-w
 @media (max-width:420px){.opts.c2{grid-template-columns:minmax(0,1fr)}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
-<style>#onb .sso,#onb .or{display:none!important}.linkbtn{border:0;background:none;color:var(--accent);font:inherit;text-decoration:underline;cursor:pointer;padding:0}html,body{overscroll-behavior:none}</style>
+<style>.is-desktop #fab{display:none!important}#onb .sso,#onb .or{display:none!important}.linkbtn{border:0;background:none;color:var(--accent);font:inherit;text-decoration:underline;cursor:pointer;padding:0}html,body{overscroll-behavior:none}</style>
 </head>
 <body>
 
@@ -750,6 +750,7 @@ async function accPlan(){const tok=await accToken();if(!tok)return;try{const r=a
 async function startCheckout(plan,btn){const tok=await accToken();if(!tok)return false;if(btn){btn.disabled=true;btn.textContent='…'}
   try{const r=await fetch(KCFG.supabaseUrl+'/functions/v1/checkout',{method:'POST',headers:{'content-type':'application/json',apikey:KCFG.anonKey,authorization:'Bearer '+tok},body:JSON.stringify({plan,back:IS_NATIVE&&SITE?SITE+'/app/':location.origin+location.pathname})});const d=await r.json();if(!r.ok||!d.url)throw 0;location.href=d.url;return true}
   catch(e){toast(L('Platbu se nepodařilo spustit. Zkus to za chvíli.','Could not start the payment. Try again in a moment.'),4000);if(btn){btn.disabled=false;btn.textContent=L('Zaplatit','Pay')}return true}}
+let AI_DETAIL='';
 function apiSample(){let dev='x';try{dev=localStorage.getItem('krouzek-dev');if(!dev){dev=uid()+uid();localStorage.setItem('krouzek-dev',dev)}}catch(e){}
   const b64=b=>new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res({mime:b.type||'image/jpeg',data:String(fr.result).split(',')[1]});fr.onerror=rej;fr.readAsDataURL(b)});
   async function call(input,opts,json){opts=opts||{};const messages=typeof input==='string'?[{role:'user',content:input}]:input.map(m=>({role:m.role,content:String(m.content)}));
@@ -757,7 +758,7 @@ function apiSample(){let dev='x';try{dev=localStorage.getItem('krouzek-dev');if(
     try{r=await fetch(KCFG.supabaseUrl+'/functions/v1/ai',{method:'POST',signal:opts.signal,headers:{'content-type':'application/json',apikey:KCFG.anonKey,authorization:'Bearer '+(tok||KCFG.anonKey),'x-device':dev},
       body:JSON.stringify({messages,images,tier:opts.modelTier||'default',json,purpose:opts.purpose||'',lang:LANG()})})}
     catch(e){throw {code:e&&e.name==='AbortError'?'cancelled':'offline'}}
-    const d=await r.json().catch(()=>({}));if(!r.ok)throw {code:d.code||'unavailable'};return d}
+    const d=await r.json().catch(()=>({}));if(!r.ok){AI_DETAIL=d.detail||d.message||d.msg||d.error||('HTTP '+r.status);throw {code:d.code||'unavailable'}}return d}
   const sample=async(input,opts)=>{const d=await call(input,opts,false);if(opts&&opts.onText)opts.onText({text:d.text||''});return {text:d.text||''}};
   sample.json=async(input,opts)=>{const d=await call(input,opts,true);return d.json};return sample}
 const SAMPLE_P=HAS_CLAUDE?window.claude.use('sample').catch(()=>null):(HAS_API?Promise.resolve(apiSample()):Promise.resolve(null));
@@ -823,7 +824,7 @@ function matrix(x,yb,rows,o={}){const out=[],cw=46,rh=40,n=rows.length,m=rows[0]
   out.push(ST(interp([[x+9,top],[x+2,top+6],[x,(top+bot)/2],[x+2,bot-6],[x+9,bot]],4),{color:o.color}));
   out.push(ST(interp([[r-9,top],[r-2,top+6],[r,(top+bot)/2],[r-2,bot-6],[r-9,bot]],4),{color:o.color}));
   rows.forEach((row,i)=>row.forEach((v,j)=>out.push(T(x+16+j*cw,yb+i*rh,String(v),{size:28,color:o.color}))));return out}
-function seedNotebooks(){const E=((S&&S.prefs&&S.prefs.lang)||'en')!=='cs',t=(cs,en)=>E?en:cs;
+function seedNotebooksDemo(){const E=((S&&S.prefs&&S.prefs.lang)||'en')!=='cs',t=(cs,en)=>E?en:cs;
   const now=Date.now(), blue='#1f4fbf', red='#c4372b', green='#2f9e5b';
   // Matematická analýza
   const ox=600, oy=830, u=62;
@@ -1078,7 +1079,7 @@ function renderOnb(){const p=S.profile,f=S.prefs;let h='';
   else if(onbStep===3)h=`<h1>Vyber si AI</h1><p class="lead">Chytřejší model přemýšlí déle, ale zvládne těžší látku. Kdykoli to změníš v nastavení.</p>
     <div class="opts c3">${Object.entries(AIS).map(([k,v])=>`<button type="button" class="opt" data-ai="${k}" aria-pressed="${p.ai===k}"><b>${v.n}</b><small>${v.d}</small></button>`).join('')}</div>`;
   else if(onbStep===4){const vs=voiceList().slice(0,5),cur=pickVoice();h=`<h1>Hlas pomocníka</h1><p class="lead">Vyber si, jak na tebe bude pomocník mluvit. Ťukni na hlas a hned ho uslyšíš.</p>
-    ${vs.length?`<div class="opts">${vs.map(v=>`<button type="button" class="opt" data-voice="${esc(v.voiceURI)}" aria-pressed="${cur&&cur.voiceURI===v.voiceURI}"><b>${esc(voiceLabel(v))}</b><small>${/premium|enhanced|vylepš|natural|neural|siri/i.test(v.name)?L('Přirozený hlas','Natural voice'):L('Základní hlas zařízení','Standard device voice')}</small></button>`).join('')}</div>`:`<p class="fine">${L('Tvoje zařízení zatím nenabízí český hlas. Appka použije výchozí.',`Your device doesn't offer a ${LANGS[LANG()].ai} voice yet. The app will use the default one.`)}</p>`}
+    ${vs.length?`<div class="opts">${vs.map(v=>`<button type="button" class="opt" data-voice="${esc(v.voiceURI)}" aria-pressed="${cur&&cur.voiceURI===v.voiceURI}"><b>${esc(voiceLabel(v))}</b><small>${/premium|enhanced|vylepš|natural|neural|siri/i.test(v.name)?L('Přirozený hlas','Natural voice'):L('Základní hlas zařízení','Standard device voice')}</small></button>`).join('')}</div>`:voiceMissingHTML()}
     <div class="group" style="margin-top:14px"><span class="eyebrow">Rychlost</span><div class="row">${[[.85,'Pomaleji'],[1,'Normálně'],[1.15,'Rychleji']].map(([r,n])=>`<button type="button" class="pill" data-rate="${r}" aria-pressed="${(S.prefs.voice.rate||1)===r}">${n}</button>`).join('')}</div></div>
     <button type="button" class="toggle" data-onbtg="autoRead" aria-pressed="${S.prefs.autoRead}" style="margin-top:14px;width:100%"><span><b>Číst odpovědi nahlas</b><small>Můžeš kdykoli změnit v nastavení.</small></span><span class="knob"></span></button>
     <p class="fine">${VOICE_TIP}</p>`}
@@ -1651,7 +1652,7 @@ function commitText(){if(!TE)return;const {v,ta,x,y,obj,size,font,color}=TE;TE=n
   else if(text){pushHistory(v.pg);const to={id:uid(),type:'text',x,y,text,size,color,font};stampRec(to);v.pg.objs.push(to);changed(v)}}
 
 /* ---------- AI: převod rukopisu ---------- */
-function errCopy(code){return ({usage:L('Dnešní dotazy zdarma došly. Zítra se obnoví, nebo si zapni Loopnote Plus.','You have used today\'s free questions. They reset tomorrow, or get Loopnote Plus.'),offline:L('Jsi offline. Pomocník potřebuje internet.','You are offline. The helper needs internet.'),not_granted:'Pomocník nemá povolený přístup k Claude. Načti stránku znovu a přístup povol.',sampling_disabled:'Claude teď pro tvůj účet není dostupný.',rate_limited:'Moc dotazů najednou. Zkus to za chvilku.',
+function errCopy0(code){return ({usage:L('Dnešní dotazy zdarma došly. Zítra se obnoví, nebo si zapni Loopnote Plus.','You have used today\'s free questions. They reset tomorrow, or get Loopnote Plus.'),offline:L('Jsi offline. Pomocník potřebuje internet.','You are offline. The helper needs internet.'),not_granted:'Pomocník nemá povolený přístup k Claude. Načti stránku znovu a přístup povol.',sampling_disabled:'Claude teď pro tvůj účet není dostupný.',rate_limited:'Moc dotazů najednou. Zkus to za chvilku.',
   session_expired:'Přihlas se znovu do Claude a zkus to.',refused:'Pomocník tohle odmítl. Zkus zakroužkovat menší část nebo napiš, k čemu to potřebuješ (třeba „učím se na zkoušku z anatomie“).',image_rejected:'Výřez se nepodařilo poslat. Zkus menší oblast.',
   images_unavailable:'Tohle zobrazení neumí poslat obrázek pomocníkovi. Otevři prototyp v aplikaci Claude.',invalid_json:'Rukopis se nepodařilo přečíst. Zkus označit méně textu.',empty:'Na výřezu jsem nenašel žádný text.'})[code]||'Spojení se přerušilo. Zkus to znovu.'}
 function cropBlob(v,b,opt={}){const k=clamp(1400/Math.max(b.w,b.h),1,2.6);const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(b.w*k));cv.height=Math.max(1,Math.round(b.h*k));const c=cv.getContext('2d');
@@ -2125,7 +2126,7 @@ window.addEventListener('resize',()=>{if(!$('#fab').hidden)placeFab()});
 
 /* ---------- opakování z chyb a zkoušky ---------- */
 const INTERVALS=[0,1,2,4,7,15,30],DAY=864e5;
-function seedReview(){const E=((S&&S.prefs&&S.prefs.lang)||'en')!=='cs',t=(cs,en)=>E?en:cs;const now=Date.now();const ma=(S&&S.notebooks||[]).find(n=>n.title==='Matematická analýza'||n.title==='Calculus');const id=ma?ma.id:null;
+function seedReviewDemo(){const E=((S&&S.prefs&&S.prefs.lang)||'en')!=='cs',t=(cs,en)=>E?en:cs;const now=Date.now();const ma=(S&&S.notebooks||[]).find(n=>n.title==='Matematická analýza'||n.title==='Calculus');const id=ma?ma.id:null;
   const mk=(q,a,topic,box,dueIn,src)=>({id:uid(),nbId:id,q,a,topic,box,due:now+dueIn,created:now,src});
   return {cards:id?[mk(t('Jak se derivuje součin $(u \\cdot v)\'$?','How do you differentiate a product $(u \\cdot v)\'$?'),'$$(u \\cdot v)\' = u\'v + uv\'$$',t('Derivace','Derivatives'),0,0,'[s:1:1]'),mk(t('Kolik je $$\\lim_{x \\to 0} \\frac{\\sin x}{x}$$','What is $$\\lim_{x \\to 0} \\frac{\\sin x}{x}$$'),t('$1$, je to základní limita.','$1$, a standard limit.'),t('Limity','Limits'),1,0,'[s:1:2]'),
       mk(t('Jak zní rovnice tečny ke grafu $f$ v bodě $x_0$?','What is the tangent line to $f$ at $x_0$?'),'$$y = f(x_0) + f\'(x_0)(x - x_0)$$',t('Derivace','Derivatives'),2,0,'[s:1:1]'),mk(t('Jaká je derivace $\\sin x$?','What is the derivative of $\\sin x$?'),'$\\cos x$',t('Derivace','Derivatives'),3,3*864e5,'[s:1:1]')]:[],
@@ -2749,7 +2750,7 @@ const VOICE={list:[]};
 function loadVoices(){try{VOICE.list=window.speechSynthesis?speechSynthesis.getVoices()||[]:[]}catch(e){VOICE.list=[]}}
 try{loadVoices();window.speechSynthesis&&speechSynthesis.addEventListener('voiceschanged',()=>{loadVoices();if(!$('#onb').hidden&&onbStep===4)renderOnb();const sv=$('#sVoice');if(sv&&!sv.options.length)settingsRedraw&&settingsRedraw()})}catch(e){}
 function voiceScore(v){let s=0;const lc=LANGS[LANG()].loc;if(v.lang.replace('_','-').toLowerCase()===lc.toLowerCase()||(LANG()==='en'&&/^en-(US|GB)/i.test(v.lang)))s+=100;else if(v.lang.slice(0,2).toLowerCase()===LANG())s+=60;else if(LANG()==='cs'&&/^sk/i.test(v.lang))s+=40;if(/premium|enhanced|vylepš|natural|neural|online|siri/i.test(v.name))s+=30;if(/google/i.test(v.name))s+=12;if(!v.localService)s+=4;return s}
-function voiceList(){const cz=VOICE.list.filter(v=>v.lang.slice(0,2).toLowerCase()===LANG()||(LANG()==='cs'&&/^sk/i.test(v.lang)));return (cz.length?cz:VOICE.list).slice().sort((a,b)=>voiceScore(b)-voiceScore(a))}
+function voiceList(){const cz=VOICE.list.filter(v=>String(v.lang).slice(0,2).toLowerCase()===LANG()||(LANG()==='cs'&&/^sk/i.test(v.lang)));return cz.slice().sort((a,b)=>voiceScore(b)-voiceScore(a))}
 function pickVoice(){const want=S.prefs.voice&&S.prefs.voice.uri;const vs=voiceList();return vs.find(v=>v.voiceURI===want)||vs[0]||null}
 function voiceLabel(v){const q=/premium|enhanced|vylepš|natural|neural|siri/i.test(v.name)?' · '+L('kvalitní','HQ'):'';return v.name.replace(/\s*\(.*?\)\s*/g,' ').replace(/Microsoft|Google|Apple/g,'').trim()+(LANG()==='cs'&&/^sk/i.test(v.lang)?' (slovensky)':LANG()!=='cs'?' ('+(v.lang.split(/[-_]/)[1]||v.lang)+')':'')+q}
 function makeUtts(text){const t=speakable(text);if(!t)return [];const parts=[];let cur='';for(const s of t.match(/[^.!?…:;]+[.!?…:;]*\s*/g)||[t]){if((cur+s).length>220&&cur){parts.push(cur);cur=s}else cur+=s}if(cur.trim())parts.push(cur);
@@ -2771,8 +2772,16 @@ function lookHTML(L){return `<div class="group"><span class="eyebrow">Motiv</spa
   <div class="group"><span class="eyebrow">Barva appky</span><div class="row">${Object.entries(ACCENTS).map(([k,a])=>`<button type="button" class="cover-sw" data-look="accent" data-v="${k}" style="background:${a[0]}" aria-pressed="${(L.accent||'teal')===k}" aria-label="${a[2]}" title="${a[2]}"></button>`).join('')}</div></div>
   <div class="group"><span class="eyebrow">Ruční písmo (tvoje text i zápisy od pomocníka)</span><div class="row">${Object.keys(HANDS).map(k=>`<button type="button" class="pill handpill" data-look="hand" data-v="${k}" aria-pressed="${(L.hand||'Kalam')===k}" style="font-family:${HANDS[k].replace(/"/g,'&quot;')}">f(x) = x² · sin x</button>`).join('')}</div></div>
   <div class="group"><span class="eyebrow">Lišta nástrojů a kulička</span><div class="row">${[['top','Lišta nahoře'],['bottom','Lišta dole']].map(([k,n])=>`<button type="button" class="pill" data-look="toolbar" data-v="${k}" aria-pressed="${(L.toolbar||'top')===k}">${n}</button>`).join('')}<span class="sep"></span>${[['s','Malá kulička'],['m','Střední'],['l','Velká']].map(([k,n])=>`<button type="button" class="pill" data-look="fab" data-v="${k}" aria-pressed="${(L.fab||'m')===k}">${n}</button>`).join('')}</div></div>`}
+/* když zařízení nemá hlas pro zvolený jazyk: přesný návod, kde ho doinstalovat */
+function voiceMissingHTML(){const n=(LANGS[LANG()]||LANGS.en),ua=navigator.userAgent,ln=LANG()==='cs'?{cs:'čeština'}[LANG()]:n.n;
+  const step=/Windows/.test(ua)?L(`Windows: Nastavení → Čas a jazyk → Řeč → Přidat hlasy → ${ln}. Pak Loopnote zavři a znovu otevři.`,`Windows: Settings → Time & language → Speech → Add voices → ${n.n}. Then close and reopen Loopnote.`)
+    :/Android/.test(ua)?L(`Android: Nastavení → Usnadnění → Převod textu na řeč → Google → Nainstalovat hlasová data → ${ln}.`,`Android: Settings → Accessibility → Text-to-speech → Google → Install voice data → ${n.n}.`)
+    :/iPad|iPhone/.test(ua)?L(`iPad: Nastavení → Zpřístupnění → Mluvený obsah → Hlasy → ${ln}.`,`iPad: Settings → Accessibility → Spoken Content → Voices → ${n.n}.`)
+    :/Mac/.test(ua)?L(`Mac: Nastavení systému → Zpřístupnění → Mluvený obsah → Systémový hlas → Spravovat hlasy → ${ln}.`,`Mac: System Settings → Accessibility → Spoken Content → System voice → Manage voices → ${n.n}.`)
+    :L(`V nastavení systému přidej hlas pro jazyk ${ln}.`,`Add a ${n.n} voice in your system settings.`);
+  return `<div class="promise"><b>${L('Pro češtinu tu zatím není hlas','No voice for this language yet')}${LANG()!=='cs'?' ('+esc(n.n)+')':''}</b>${esc(step)}</div>`}
 function voiceHTML(){const vs=voiceList(),cur=pickVoice(),pv=S.prefs.voice||{};
-  return `<div class="group"><span class="eyebrow">Hlas pomocníka</span>${vs.length?`<div class="row"><select id="sVoice" class="sel" style="flex:1" aria-label="Hlas">${vs.map(v=>`<option value="${esc(v.voiceURI)}" ${cur&&cur.voiceURI===v.voiceURI?'selected':''}>${esc(voiceLabel(v))}</option>`).join('')}</select><button type="button" class="btn" data-vtest>Vyzkoušet</button></div>`:'<p class="fine" style="margin:0">Tohle zařízení zatím nenabízí žádný hlas. Zkus stránku načíst znovu.</p>'}
+  return `<div class="group"><span class="eyebrow">Hlas pomocníka</span>${vs.length?`<div class="row"><select id="sVoice" class="sel" style="flex:1" aria-label="Hlas">${vs.map(v=>`<option value="${esc(v.voiceURI)}" ${cur&&cur.voiceURI===v.voiceURI?'selected':''}>${esc(voiceLabel(v))}</option>`).join('')}</select><button type="button" class="btn" data-vtest>Vyzkoušet</button></div>`:voiceMissingHTML()}
     <label class="fld">Rychlost řeči <input type="range" id="sRate" min="0.7" max="1.4" step="0.05" value="${pv.rate||1}"></label>
     <button type="button" class="toggle" data-tg="autoRead" aria-pressed="${S.prefs.autoRead}"><span><b>Číst odpovědi nahlas</b><small>Pomocník ti každou odpověď rovnou přečte a píše ji tak, aby se dobře poslouchala.</small></span><span class="knob"></span></button>
     <p class="fine" style="margin:0">${VOICE_TIP}</p></div>`}
@@ -3084,16 +3093,44 @@ function plansDialog(){if(!HAS_API)return plansDialogDemo();const plus=S.profile
       b.disabled=true;try{await accSendLink(em,'buy:'+mode);if(IS_NATIVE){codeFor=em;draw();setTimeout(()=>{const i=$('#plCode',m);if(i)i.focus()},50);return}$('#plMsg',m).textContent=L('Hotovo! Otevři e-mail na tomhle zařízení a klikni na odkaz.','Done! Open the email on this device and tap the link.')}catch(err){$('#plMsg',m).textContent=L('Odkaz se nepodařilo poslat. Zkus to znovu.','Could not send the link. Try again.');b.disabled=false}return}
     if('verify' in d){b.disabled=true;try{await accVerifyCode(codeFor,$('#plCode',m).value);toast(L('Přihlášeno','Signed in'));const pl=mode;mode=null;codeFor=null;draw();if(pl)startCheckout(pl)}catch(err){$('#plMsg',m).textContent=L('Kód nesedí nebo vypršel.','The code is wrong or expired.');b.disabled=false}return}
     if('logout' in d){ACC.s=null;accSave();S.profile.plan='free';save();draw()}})}
-/* počítač: bublina nad obrazovkou pošle výřez sem -> uloží se do sešitu „Z obrazovky“ a otevře se pomocník */
-function screenToNote(url){const title=L('Z obrazovky','From screen');let nb=S.notebooks.find(n=>n.title===title);
+/* počítač: kroužek na ploše -> vysvětlení v okénku na ploše; do sešitu až po kliknutí „Uložit do sešitu“ */
+async function explainShot(url,question,history){const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};const blob=await (await fetch(url)).blob();
+  const sys=`${TEACHER()}
+${profileCtx(null)}
+JAK MLUVIT: ${styleGuide()}
+Student si na ploše počítače (web, video, PDF, jiná aplikace) zakroužkoval výřez, který je na obrázku. ${question?'Odpověz na jeho otázku k tomuto výřezu.':'Stručně vysvětli, o co jde a jak tomu rozumět. Když je to úloha, naveď ho: co je potřeba a jaký je první krok. Celé řešení dej jen u jednoduché věci.'}
+Odpověď se ukáže v malém okénku: nejvýš asi 120 slov, krátké odstavce nebo odrážky „- “, klíčové pojmy **tučně**. Matematiku piš znaky Unicode (x², √, ·, π, ≤, →, ∫), nikdy LaTeX. ${NO_CHAT}`;
+  const input=history&&history.length?[{role:'user',content:sys},...history.slice(-6),{role:'user',content:question}]:(question?sys+'\n\nOTÁZKA STUDENTA: '+question:sys);
+  if(usageLeft()<=0)throw {code:'usage'};
+  const r=await sample(input,{images:[blob],modelTier:S.profile.ai||'default'});spendUsage();return String(r.text||'').trim()}
+function screenToNote(url,text){const title=L('Z obrazovky','From screen');let nb=S.notebooks.find(n=>n.title===title);
   if(!nb){nb={id:uid(),title,subject:'',cover:{color:'#6b7c93',pattern:'linen'},paper:{type:S.prefs.paperType,color:S.prefs.paperColor},layout:'pages',pages:[{id:uid(),h:H,objs:[],rev:0,ocr:'',ocrRev:0}],updated:Date.now()};S.notebooks.push(nb);save()}
-  if($('#modalRoot').children.length)closeModal();if(!S.profile.onboarded){S.profile.onboarded=true;save()}openNotebook(nb.id,nb.pages.length-1);
+  if($('#modalRoot').children.length)closeModal();if(!S.profile.onboarded){S.profile.onboarded=true;save()}
   const im=new Image();im.onload=()=>{const cv=document.createElement('canvas');cv.width=im.width;cv.height=im.height;cv.getContext('2d').drawImage(im,0,0);imgCache.set(url,cv);
-    let w=Math.min(560,W-80),h=w*im.height/im.width;const mx=H*.6;if(h>mx){w*=mx/h;h=mx}const o={id:uid(),type:'image',x:0,y:0,w,h,src:url};placeObj(o);
-    setTimeout(()=>{const v=ED&&ED.views.find(x=>x.pg.objs.includes(o));if(v){clearSel();openAI(v,{x:o.x-8,y:o.y-8,w:o.w+16,h:o.h+16},null)}},400)};im.src=url}
-if(window.loopnoteDesktop&&window.loopnoteDesktop.onImage){window.loopnoteDesktop.onImage(screenToNote);
-  window.loopnoteDesktop.onCaptureFailed(()=>toast(L('Nejde vyfotit obrazovku. Na Macu povol Loopnote v Nastavení → Soukromí → Nahrávání obrazovky.','Could not capture the screen. On a Mac allow Loopnote in Settings → Privacy → Screen Recording.'),6000))}
+    let w=Math.min(560,W-120),h=w*im.height/im.width;const mx=H*.5;if(h>mx){w*=mx/h;h=mx}
+    // obrázek + vysvětlení pod něj jako zápis
+    let pg=nb.pages[nb.pages.length-1];let maxY=0;for(const q of pg.objs){const bb=bboxOf(q);maxY=Math.max(maxY,bb.y+bb.h)}
+    let y=pg.objs.length?maxY+60:90;if(nb.layout==='pages'&&pg.objs.length&&y+h>pg.h-200){pg={id:uid(),h:H,objs:[],rev:0,ocr:'',ocrRev:0};nb.pages.push(pg);y=90}
+    pg.objs.push({id:uid(),type:'image',x:60,y,w,h,src:url});pg.rev=(pg.rev||0)+1;touch(nb);
+    if(text&&text.trim())appendNote(nb,mdToNote(text,''));save();openNotebook(nb.id,nb.pages.indexOf(pg));toast(L('Uloženo do sešitu „Z obrazovky“','Saved to the “From screen” notebook'))};im.src=url}
+if(window.loopnoteDesktop){document.documentElement.classList.add('is-desktop');
+  const D=window.loopnoteDesktop;if(D.hello){D.hello({ui:LANG(),loc:LOC()});setInterval(()=>D.hello({ui:LANG(),loc:LOC()}),5000)}D.onImage(p=>screenToNote(p.url||p,p.text||''));
+  D.onExplain(async req=>{try{const text=await explainShot(req.url,req.q,req.history);D.explainResult({id:req.id,text,lang:LOC(),ui:LANG()})}
+    catch(e){D.explainResult({id:req.id,err:errCopy(e&&e.code)+(e&&e.code==='usage'?'':''),lang:LOC(),ui:LANG()})}});
+  D.onCaptureFailed(()=>toast(L('Nejde vyfotit obrazovku. Na Macu povol Loopnote v Nastavení → Soukromí → Nahrávání obrazovky.','Could not capture the screen. On a Mac allow Loopnote in Settings → Privacy → Screen Recording.'),6000))}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&HAS_API&&ACC.s)accPlan()});
+function errCopy(code){const m=errCopy0(code),d=AI_DETAIL;AI_DETAIL='';return d&&!['cancelled','usage','refused','offline'].includes(code)?m+' ('+String(d).slice(0,160)+')':m}
+/* nová instalace: 3 sešity (1 s ukázkou, 2 prázdné), názvy podle jazyka, žádná vymyšlená zkouška ani kartičky */
+function SEED3_(){return {math:{en:'Mathematics',cs:'Matematika',sk:'Matematika',pl:'Matematyka',de:'Mathematik',fr:'Mathématiques',es:'Matemáticas',it:'Matematica',pt:'Matemática',uk:'Математика',hu:'Matematika',nl:'Wiskunde'},
+  notes:{en:'Notes',cs:'Poznámky',sk:'Poznámky',pl:'Notatki',de:'Notizen',fr:'Notes',es:'Apuntes',it:'Appunti',pt:'Apontamentos',uk:'Нотатки',hu:'Jegyzetek',nl:'Aantekeningen'},
+  ideas:{en:'Ideas',cs:'Nápady',sk:'Nápady',pl:'Pomysły',de:'Ideen',fr:'Idées',es:'Ideas',it:'Idee',pt:'Ideias',uk:'Ідеї',hu:'Ötletek',nl:'Ideeën'}}}
+function seedNotebooks(){const lg=(S&&S.prefs&&S.prefs.lang)||'en',SD=SEED3_(),T=k=>SD[k][lg]||SD[k].en;const d=seedNotebooksDemo();const m=d[0];
+  const empty=(k,color,pattern,type)=>({id:uid(),title:T(k),subject:'',cover:{color,pattern},paper:{type,color:'white'},layout:'pages',pages:[{id:uid(),h:H,objs:[],rev:0,ocr:'',ocrRev:0}],updated:Date.now()-864e5,seed:true});
+  return [Object.assign({},m,{title:T('math'),subject:'',pages:[m.pages[0]],seed:true}),empty('notes','#c0563f','linen','lines'),empty('ideas','#3d4a46','grid','blank')]}
+function seedReview(){return {cards:[],exams:[],stats:{},streak:{d:'',n:0}}}
+(function seedV3(){if(S.prefs.seed3)return;S.prefs.seed3=1;const old=S.notebooks.filter(n=>n.seed&&!n.edited&&!n.shared),ids=new Set(old.map(n=>n.id));
+  if(old.length){S.notebooks=S.notebooks.filter(n=>!ids.has(n.id));if(S.review){S.review.cards=S.review.cards.filter(c=>!ids.has(c.nbId));S.review.exams=S.review.exams.filter(e=>!ids.has(e.nbId));for(const k of ids)delete S.review.stats[k]}
+    S.notebooks.unshift(...seedNotebooks())}save()})();
 /* po návratu z e-mailu nebo z platby */
 (function standaloneBoot(){if(!HAS_API)return;accLoad();accFromHash();const q=new URLSearchParams(location.search);const next=q.get('next'),paid=q.get('paid');
   if(next||paid)history.replaceState(null,'',location.pathname);
