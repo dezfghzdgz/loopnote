@@ -1,6 +1,7 @@
 # Sestaví appky Loopnote: Android (APK), Windows (instalačka), Mac (DMG), Linux (AppImage).
-# Spuštění: GitHub → Actions → "Build apps" → Run workflow. Hotové soubory najdeš dole v běhu (Artifacts).
-# Když pushneš tag (např. v0.1.0), soubory se navíc nahrají do Releases a web na ně odkazuje.
+# Spuštění: GitHub → Actions → "Build apps" → Run workflow.
+# Hotové instalačky se samy vydají do veřejného repozitáře loopnote-download (potřebuje secret RELEASES_TOKEN)
+# a tlačítka Download na webu je rovnou stahují.
 name: Build apps
 
 on:
@@ -77,7 +78,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # po každém sestavení vydá novou verzi do veřejného repozitáře loopnote-download
+    # (zdrojový kód může zůstat soukromý) – web pak stahuje přímo odtud
     needs: [android, desktop]
     runs-on: ubuntu-latest
     steps:
@@ -87,4 +89,10 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          repository: ${{ github.repository_owner }}/loopnote-download
+          token: ${{ secrets.RELEASES_TOKEN }}
+          target_commitish: main
+          tag_name: v0.1.${{ github.run_number }}
+          name: Loopnote 0.1.${{ github.run_number }}
+          make_latest: true
           files: out/*
