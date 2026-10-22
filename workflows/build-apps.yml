@@ -1,0 +1,90 @@
+# Sestaví appky Loopnote: Android (APK), Windows (instalačka), Mac (DMG), Linux (AppImage).
+# Spuštění: GitHub → Actions → "Build apps" → Run workflow. Hotové soubory najdeš dole v běhu (Artifacts).
+# Když pushneš tag (např. v0.1.0), soubory se navíc nahrají do Releases a web na ně odkazuje.
+name: Build apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Copy web app
+        run: node scripts/prepare-www.mjs mobile/www
+      - name: Install Capacitor
+        working-directory: mobile
+        run: npm install
+      - name: Create Android project
+        working-directory: mobile
+        run: |
+          npx cap add android
+          npx capacitor-assets generate --android
+          npx cap sync android
+      - name: Build APK
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - name: Rename
+        run: cp mobile/android/app/build/outputs/apk/debug/app-debug.apk Loopnote-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Loopnote-android
+          path: Loopnote-android.apk
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Copy web app
+        run: node scripts/prepare-www.mjs desktop/www
+      - name: Install
+        working-directory: desktop
+        run: npm install
+      - name: Build installer
+        working-directory: desktop
+        run: npx electron-builder --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Loopnote-${{ runner.os }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
