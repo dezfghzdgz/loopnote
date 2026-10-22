@@ -1,0 +1,17 @@
+{
+  "name": "loopnote-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Loopnote for Android (and later iOS) – wraps the web app with Capacitor",
+  "scripts": {
+    "sync": "cap sync"
+  },
+  "dependencies": {
+    "@capacitor/android": "6.2.2",
+    "@capacitor/core": "6.2.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "6.2.2"
+  }
+}

@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f7c6b">
+<link rel="icon" href="app/icons/icon-192.png">
+<title>Loopnote</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Loopnote – a tablet notebook for students with an AI teacher. Take notes, import lecture PDFs, revise, and circle what you don't get.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Caveat:wght@500;700&display=swap">
+<style>
+/* Layout: sešitový papír jako plocha stránky; hero = text vlevo + otevřená stránka sešitu vpravo, kde se kreslí kroužek kolem chyby.
+   Sekce jdou pod sebou v úzkém sloupci s okrajovou linkou jako v sešitě. */
+:root{
+  --paper:#fbfcfa; --paper-2:#f1f5f2; --rule:#dbe6ee; --margin:#f2b5b0;
+  --ink:#17201d; --ink-2:#4a5752; --teal:#0f7c6b; --teal-ink:#0b5e51; --teal-soft:#dff1ec;
+  --hl:#ffe36e; --red:#e03131; --card:#ffffff; --line:#dfe6e2;
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Atkinson Hyperlegible",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-hand:"Caveat","Segoe Print","Bradley Hand",cursive;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#141b19; --paper-2:#1a2320; --rule:#22302c; --margin:#5a2f2c;
+  --ink:#e8efec; --ink-2:#a7b5b0; --teal:#49c7ad; --teal-ink:#7fe0c9; --teal-soft:#183530;
+  --hl:#c9a92a; --red:#ff6b6b; --card:#1b2421; --line:#2b3733; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#141b19; --paper-2:#1a2320; --rule:#22302c; --margin:#5a2f2c;
+  --ink:#e8efec; --ink-2:#a7b5b0; --teal:#49c7ad; --teal-ink:#7fe0c9; --teal-soft:#183530;
+  --hl:#c9a92a; --red:#ff6b6b; --card:#1b2421; --line:#2b3733; color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 17px/1.6 var(--f-body);
+  background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 31px,var(--rule) 31px,var(--rule) 32px);
+  -webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--paper)}
+a{color:var(--teal-ink)}
+:focus-visible{outline:3px solid var(--teal);outline-offset:3px;border-radius:6px}
+.wrap{max-width:1120px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--f-display);line-height:1.08;letter-spacing:-.02em;text-wrap:balance;margin:0}
+h2{font-size:clamp(30px,4.6vw,48px);font-weight:800}
+h3{font-size:21px;font-weight:700;letter-spacing:-.01em}
+p{margin:0}
+.eyebrow{font:700 12.5px/1 var(--f-body);letter-spacing:.12em;text-transform:uppercase;color:var(--teal-ink)}
+.hand{font-family:var(--f-hand);font-weight:700}
+.mark{background:linear-gradient(transparent 55%,var(--hl) 55%,var(--hl) 92%,transparent 92%);padding:0 .08em}
+
+/* header */
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.top .wrap{display:flex;align-items:center;gap:18px;padding-block:12px}
+.brand{display:flex;align-items:center;gap:10px;font:800 21px/1 var(--f-display);color:var(--ink);text-decoration:none;letter-spacing:-.02em}
+.brand .lg{width:36px;height:36px;border-radius:10px;background:var(--teal);color:#fff;display:grid;place-items:center}
+.brand .lg svg{width:26px;height:26px}
+nav.links{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+nav.links a{padding:8px 10px;border-radius:8px;color:var(--ink-2);text-decoration:none;font-size:15px}
+nav.links a:hover{background:var(--paper-2);color:var(--ink)}
+.lang{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;flex:none}
+.lang button{border:0;background:transparent;color:var(--ink-2);font:700 13px var(--f-body);padding:7px 11px;cursor:pointer}
+.lang button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+@media (max-width:760px){nav.links{display:none}.lang{margin-left:auto}}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 20px;border-radius:12px;font:700 16px var(--f-body);text-decoration:none;border:2px solid transparent;cursor:pointer;transition:transform .15s ease}
+.btn:hover{transform:translateY(-1px)}
+.btn.primary{background:var(--teal);color:#fff}
+:root[data-theme="dark"] .btn.primary{color:#06231e}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.primary{color:#06231e}}
+.btn.ghost{border-color:var(--ink);color:var(--ink);background:var(--card)}
+
+/* hero */
+.hero{padding-block:56px 40px}
+.hero .wrap{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
+.hero h1{font-size:clamp(40px,5.6vw,70px);font-weight:800;letter-spacing:-.035em}
+.hero h1 .ring{position:relative;display:inline-block;white-space:nowrap}
+.hero h1 .ring svg{position:absolute;left:-6%;top:-14%;width:112%;height:128%;overflow:visible;pointer-events:none}
+.hero h1 .ring path{fill:none;stroke:var(--red);stroke-width:3.2;stroke-linecap:round;stroke-dasharray:640;stroke-dashoffset:0}
+.hero .lead{font-size:clamp(18px,2.1vw,21px);color:var(--ink-2);max-width:34em;margin-top:22px}
+.hero .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+.hero .note{margin-top:18px;font-size:14px;color:var(--ink-2)}
+@media (max-width:900px){.hero .wrap{grid-template-columns:1fr}.hero{padding-top:32px}}
+
+/* the notebook page illustration */
+.sheet{position:relative;background:var(--card);border-radius:18px;box-shadow:0 30px 60px -36px rgba(10,40,34,.45),0 0 0 1px var(--line);padding:28px 26px 24px 64px;
+  background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 35px,var(--rule) 35px,var(--rule) 36px);background-position:0 18px;min-width:0}
+.sheet::before{content:"";position:absolute;left:46px;top:0;bottom:0;width:2px;background:var(--margin)}
+.sheet .hw{font-family:var(--f-hand);font-size:clamp(24px,3vw,30px);line-height:36px;color:#1b3a8f}
+:root[data-theme="dark"] .sheet .hw{color:#9db7ff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .sheet .hw{color:#9db7ff}}
+.sheet .hw.t{color:var(--red);font-weight:700}
+.sheet .bad{position:relative;display:inline-block}
+.sheet .bad svg{position:absolute;left:-12px;top:-8px;width:calc(100% + 24px);height:calc(100% + 16px);overflow:visible}
+.sheet .bad path{fill:none;stroke:var(--teal);stroke-width:3;stroke-linecap:round;stroke-dasharray:420;stroke-dashoffset:420;animation:draw 1.2s .6s ease-out forwards}
+.tip{margin-top:16px;margin-left:-38px;background:var(--teal-soft);border:1px solid color-mix(in srgb,var(--teal) 30%,transparent);border-radius:14px;padding:14px 16px;font-size:15.5px;line-height:1.5;opacity:1;animation:pop .5s 1.7s both}
+.tip b{display:block;font:800 13px var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--teal-ink);margin-bottom:4px}
+.tip .step{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.tip .step span{font-size:13px;font-weight:700;border-radius:999px;padding:4px 10px;background:var(--card);border:1px solid var(--line)}
+.tip .step span.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+.bubble{position:absolute;right:-14px;bottom:-18px;width:62px;height:62px;border-radius:50%;background:var(--teal);color:#fff;display:grid;place-items:center;box-shadow:0 14px 28px -12px rgba(15,124,107,.7)}
+.bubble svg{width:34px;height:34px}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes pop{from{opacity:0;transform:translateY(8px)}}
+@media (prefers-reduced-motion:reduce){.sheet .bad path{animation:none;stroke-dashoffset:0}.tip{animation:none}}
+
+section{padding-block:64px}
+.sec-head{display:grid;gap:12px;max-width:760px;margin-bottom:34px}
+.sec-head p{color:var(--ink-2);font-size:18px}
+
+/* who */
+.who{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.who article{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:10px;align-content:start;min-width:0}
+.who .lvl{font:700 12px var(--f-body);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2)}
+.who .quote{font-family:var(--f-hand);font-size:23px;line-height:1.15;color:var(--teal-ink)}
+.who p{font-size:15.5px;color:var(--ink-2)}
+@media (max-width:980px){.who{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:540px){.who{grid-template-columns:1fr}}
+
+/* how */
+.how{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;counter-reset:s;border-top:2px solid var(--ink)}
+.how li{list-style:none;padding:20px 20px 4px 0;display:grid;gap:8px;align-content:start;min-width:0}
+.how li+li{padding-left:20px;border-left:1px solid var(--line)}
+.how .n{font:800 15px var(--f-display);color:var(--teal-ink)}
+.how p{color:var(--ink-2);font-size:15.5px}
+@media (max-width:860px){.how{grid-template-columns:1fr 1fr}.how li:nth-child(3){padding-left:0;border-left:0}.how li{border-top:1px solid var(--line)}}
+@media (max-width:520px){.how{grid-template-columns:1fr}.how li,.how li+li{padding-left:0;border-left:0}}
+ol.how{padding:0;margin:0}
+
+/* features */
+.feat{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;background:var(--line);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.feat div{background:var(--card);padding:18px 20px;display:grid;gap:4px;min-width:0}
+.feat b{font-size:16.5px}
+.feat span{font-size:14.5px;color:var(--ink-2)}
+@media (max-width:860px){.feat{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.feat{grid-template-columns:1fr}}
+
+/* about */
+.about{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:start;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:28px}
+.about .ph{width:92px;height:92px;border-radius:50%;background:var(--teal-soft);display:grid;place-items:center;font:800 30px var(--f-display);color:var(--teal-ink)}
+.about p+p{margin-top:12px}
+.about .sig{font-family:var(--f-hand);font-size:28px;color:var(--teal-ink);margin-top:10px}
+.rules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:20px}
+.rules div{border-top:3px solid var(--teal);padding-top:12px;font-size:15px;color:var(--ink-2)}
+.rules b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+@media (max-width:720px){.about{grid-template-columns:1fr}.rules{grid-template-columns:1fr}}
+
+/* pricing */
+.plans{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:stretch}
+.plan{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;display:grid;gap:10px;align-content:start;min-width:0}
+.plan.hl{border:2px solid var(--teal);box-shadow:0 20px 40px -30px rgba(15,124,107,.6)}
+.plan .price{font:800 38px/1 var(--f-display);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.plan .price small{font:400 15px var(--f-body);color:var(--ink-2);letter-spacing:0}
+.plan ul{margin:4px 0 0;padding-left:18px;color:var(--ink-2);font-size:15px;display:grid;gap:4px}
+@media (max-width:860px){.plans{grid-template-columns:1fr}}
+
+/* try */
+.try{display:grid;grid-template-columns:1.1fr .9fr;gap:22px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px;min-width:0}
+.steps{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:12px;counter-reset:st}
+.steps li{display:grid;grid-template-columns:32px 1fr;gap:12px;align-items:start;counter-increment:st}
+.steps li::before{content:counter(st);width:32px;height:32px;border-radius:50%;background:var(--ink);color:var(--paper);display:grid;place-items:center;font:800 15px var(--f-display)}
+.devices{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.devices button{border:1px solid var(--line);background:var(--paper-2);color:var(--ink);border-radius:999px;padding:7px 14px;font:700 14px var(--f-body);cursor:pointer}
+.devices button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.qr{display:flex;gap:16px;align-items:center;margin-top:18px;flex-wrap:wrap}
+.qr #qr{background:#fff;padding:10px;border-radius:12px;border:1px solid var(--line);width:150px;height:150px;display:grid;place-items:center}
+.qr #qr img,.qr #qr canvas{width:130px!important;height:130px!important}
+.qr .url{font:700 15px var(--f-body);word-break:break-all}
+form{display:grid;gap:12px;margin-top:14px}
+label.f{display:grid;gap:6px;font-size:14px;font-weight:700}
+input,select,textarea{font:400 16px var(--f-body);color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:11px 12px;width:100%}
+textarea{min-height:76px;resize:vertical}
+.ok{background:var(--teal-soft);border-radius:12px;padding:12px 14px;font-size:15px}
+.err{color:var(--red);font-size:14.5px}
+@media (max-width:860px){.try{grid-template-columns:1fr}}
+
+/* faq */
+.dl{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.dlc{display:grid;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;text-decoration:none;color:var(--ink);min-width:0;transition:border-color .15s,transform .15s}
+.dlc:hover{border-color:var(--teal);transform:translateY(-2px)}.dlc b{font:800 19px var(--f-display)}.dlc span{font-size:14px;color:var(--ink-2)}
+@media (max-width:980px){.dl{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:480px){.dl{grid-template-columns:1fr}}
+.faq{display:grid;gap:10px;max-width:820px}
+.faq details{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px 18px}
+.faq summary{cursor:pointer;font-weight:700;padding:14px 0;list-style:none;display:flex;justify-content:space-between;gap:12px}
+.faq summary::after{content:"+";font:800 20px/1 var(--f-display);color:var(--teal-ink)}
+.faq details[open] summary::after{content:"–"}
+.faq details p{padding-bottom:16px;color:var(--ink-2)}
+
+footer{padding-block:36px 48px;border-top:1px solid var(--line);color:var(--ink-2);font-size:14.5px}
+footer .wrap{display:flex;gap:18px;flex-wrap:wrap;justify-content:space-between}
+</style>
+
+<script src="config.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Loopnote"><span class="lg"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M27.5 10.2C23.6 7.4 16.8 7.6 12.4 11.3 7.3 15.6 7.3 24 11.9 28.6c4.9 4.9 13.3 4.6 17.4-1 3.4-4.6 2.6-11.2-1.8-14.7-2.6-2.1-6-2.8-9-2" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/><circle cx="31.5" cy="8.5" r="3.4" fill="#ffd43b"/></svg></span>Loopnote</a>
+    <nav class="links" aria-label="Sekce">
+      <a href="#for" data-cs="Pro koho">Who it's for</a>
+      <a href="#how" data-cs="Co umí">Features</a>
+      <a href="#pricing" data-cs="Ceník">Pricing</a>
+      <a href="#download" data-cs="Stáhnout">Download</a>
+    </nav>
+    <div class="lang" role="group" aria-label="Jazyk / Language"><button type="button" id="len" aria-pressed="true">EN</button><button type="button" id="lcs" aria-pressed="false">CZ</button></div>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <span class="eyebrow" data-cs="Pro studenty · sešit + AI učitel">For students · notebook + AI teacher</span>
+        <h1 style="margin-top:14px"><span data-cs="Piš poznámky.">Take notes.</span><br><span data-cs="Zakroužkuj, co">Circle what you</span> <span class="ring"><span data-cs="nechápeš.">don't get.</span><svg viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true"><path d="M262 18C210 2 92 0 38 22 4 37 2 70 40 84c58 20 182 18 226-6 30-17 26-48-6-62-14-6-38-9-58-8"/></svg></span></h1>
+        <p class="lead" data-cs="Sešit pro tablet, kam píšeš perem, nahráváš PDF z přednášek a opakuješ si. Když se zasekneš, AI učitel ti poradí – ne opíše.">A tablet notebook for your notes, lecture PDFs and revision. When you get stuck, the AI teacher helps you – it doesn't just give you the answer.</p>
+        <div class="cta">
+          <a class="btn primary" href="#try" data-cs="Vyzkoušet na tabletu">Try it on a tablet</a>
+          <a class="btn ghost" href="#beta" data-cs="Přidat se do bety">Join the beta</a>
+        </div>
+        <p class="note" data-cs="Zdarma v betě · Android, iPad, počítač · 12 jazyků">Free in beta · Android, iPad, computer · 12 languages</p>
+      </div>
+      <div class="sheet" aria-label="Example: a circled mistake and a hint">
+        <div class="hw t" data-cs="Př. 3: zderivuj">Ex. 3: differentiate</div>
+        <div class="hw">f(x) = x² · sin x</div>
+        <div class="hw"><span class="bad">f′(x) = 2x · cos x<svg viewBox="0 0 200 50" preserveAspectRatio="none" aria-hidden="true"><path d="M180 8C140-2 40-1 14 12-6 22 0 42 34 46c48 6 132 4 154-10 14-9 6-26-20-30"/></svg></span></div>
+        <div class="tip"><b data-cs="Nápověda">Hint</b><span data-cs="Skoro! x² · sin x je součin – použij (u·v)′ = u′v + uv′. Co je u a co v?">Close! x² · sin x is a product – use (u·v)′ = u′v + uv′. What are u and v?</span>
+          <div class="step"><span class="on" data-cs="Nápověda">Hint</span><span data-cs="Kontrola">Check</span><span data-cs="Další krok">Next step</span><span data-cs="Postup">Solution</span></div></div>
+        <div class="bubble" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M27.5 10.2C23.6 7.4 16.8 7.6 12.4 11.3 7.3 15.6 7.3 24 11.9 28.6c4.9 4.9 13.3 4.6 17.4-1 3.4-4.6 2.6-11.2-1.8-14.7-2.6-2.1-6-2.8-9-2" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/><circle cx="31.5" cy="8.5" r="3.4" fill="#ffd43b"/></svg></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="for">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow" data-cs="Pro koho">Who it's for</span>
+        <h2 data-cs="Pro studenty, kteří se učí sami.">For students who study on their own.</h2>
+      </div>
+      <div class="who">
+        <article><span class="lvl" data-cs="Základní škola">Primary school</span><span class="quote" data-cs="„Mamka už zlomky neumí.“">“Mum doesn't remember fractions.”</span></article>
+        <article><span class="lvl" data-cs="Střední škola">High school</span><span class="quote" data-cs="„V květnu maturita.“">“Finals in May.”</span></article>
+        <article><span class="lvl" data-cs="Vysoká škola">University</span><span class="quote" data-cs="„Přednáška byla moc rychlá.“">“The lecture was too fast.”</span></article>
+        <article><span class="lvl" data-cs="Medicína">Medicine</span><span class="quote" data-cs="„Tisíc pojmů do pátku.“">“A thousand terms by Friday.”</span></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow" data-cs="Co umí">What it does</span>
+        <h2 data-cs="Všechno do školy v jednom sešitě.">Everything for school in one notebook.</h2>
+      </div>
+      <div class="feat">
+        <div><b data-cs="Poznámky perem">Handwritten notes</b><span data-cs="Linky, čtverečky, obrázky, grafy.">Lines, grids, images, graphs.</span></div>
+        <div><b data-cs="PDF z přednášek">Lecture PDFs</b><span data-cs="Píšeš rovnou do slajdů.">Write right on the slides.</span></div>
+        <div><b data-cs="AI učitel">AI teacher</b><span data-cs="Nápověda, kontrola, nebo celý postup.">Hint, check or full solution.</span></div>
+        <div><b data-cs="Testy a kartičky">Tests & flashcards</b><span data-cs="Z tvých vlastních poznámek.">Made from your own notes.</span></div>
+        <div><b data-cs="Denní série">Daily streak</b><span data-cs="5 minut denně stačí.">5 minutes a day is enough.</span></div>
+        <div><b data-cs="Kalendář">Calendar</b><span data-cs="Připomene testy a úkoly.">Reminds you of tests and homework.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="about">
+    <div class="wrap">
+      <div class="about">
+        <div class="ph" aria-hidden="true">D</div>
+        <div>
+          <span class="eyebrow" data-cs="Kdo jsme">Who we are</span>
+          <p style="margin-top:10px;font-size:18px" data-cs="Jsem Daniel, student z Plzně. Na vysoké jsem zjistil, že pomoc nejde najít, když ji potřebuješ – večer před zkouškou. Tak jsem začal stavět sešit, který pomůže.">I'm Daniel, a student from Pilsen. At university I found that help is hard to find when you need it – the night before an exam. So I started building a notebook that helps.</p>
+          <div class="sig">Daniel</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow" data-cs="Ceník">Pricing</span>
+        <h2 data-cs="V betě zdarma.">Free during the beta.</h2>
+      </div>
+      <div class="plans">
+        <div class="plan"><h3 data-cs="Zdarma">Free</h3><div class="price"><span data-price="free">€0</span></div><ul><li data-cs="Neomezené poznámky">Unlimited notes</li><li data-cs="10 dotazů na AI denně">10 AI questions a day</li></ul></div>
+        <div class="plan hl"><h3>Plus</h3><div class="price"><span data-price="month">€3.99</span> <small data-cs="/ měsíc">/ month</small></div><ul><li data-cs="AI bez limitu">Unlimited AI</li><li data-cs="7 dní zdarma">7 days free</li></ul></div>
+        <div class="plan"><h3 data-cs="Zkouškové">Exam month</h3><div class="price"><span data-price="exam">€4.99</span> <small data-cs="/ 30 dní">/ 30 days</small></div><ul><li data-cs="Plus na měsíc, bez předplatného">Plus for a month, no subscription</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="download">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow" data-cs="Stáhnout">Download</span>
+        <h2 data-cs="Na počítač, tablet i mobil.">For your computer, tablet and phone.</h2>
+      </div>
+      <div class="dl">
+        <a class="dlc" data-dl="Loopnote-Setup.exe" href="#try"><b>Windows</b><span data-cs="Instalačka · s bublinou nad obrazovkou">Installer · with the on-screen bubble</span></a>
+        <a class="dlc" data-dl="Loopnote-mac.dmg" href="#try"><b>Mac</b><span data-cs="DMG · s bublinou nad obrazovkou">DMG · with the on-screen bubble</span></a>
+        <a class="dlc" data-dl="Loopnote-android.apk" href="#try"><b>Android</b><span data-cs="APK pro tablet i mobil">APK for tablet and phone</span></a>
+        <a class="dlc" href="#try"><b>iPad · iPhone</b><span data-cs="Instalace z webu (níže)">Install from the web (below)</span></a>
+        <a class="dlc" data-dl="Loopnote-linux.AppImage" href="#try"><b>Linux</b><span>AppImage</span></a>
+      </div>
+      <p class="note" id="dlNote" style="margin-top:14px;font-size:14px;color:var(--ink-2)" data-cs="Beta není podepsaná: Windows → Další informace → Přesto spustit · Mac → pravý klik → Otevřít · Android → povolit instalaci z tohoto zdroje.">The beta isn't signed yet: Windows → More info → Run anyway · Mac → right-click → Open · Android → allow installs from this source.</p>
+    </div>
+  </section>
+
+  <section id="try">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow" data-cs="Vyzkoušet">Try it</span>
+        <h2 data-cs="Nainstaluj si ho na tablet.">Install it on your tablet.</h2>
+      </div>
+      <div class="try">
+        <div class="panel">
+          <div class="devices" role="group" aria-label="Device">
+            <button type="button" data-dev="android" aria-pressed="true">Android</button>
+            <button type="button" data-dev="ipad" aria-pressed="false">iPad</button>
+            <button type="button" data-dev="pc" aria-pressed="false" data-cs="Počítač">Computer</button>
+          </div>
+          <ol class="steps" id="steps"></ol>
+          <div class="qr">
+            <div id="qr" aria-label="QR code"></div>
+            <div style="display:grid;gap:10px;min-width:0">
+              <span class="url" id="appUrl"></span>
+              <a class="btn primary" id="openApp" href="app/" data-cs="Otevřít appku">Open the app</a>
+            </div>
+          </div>
+        </div>
+        <div class="panel" id="beta">
+          <h3 data-cs="Přidat se do bety">Join the beta</h3>
+          <form id="betaForm" novalidate>
+            <label class="f"><span>E-mail</span><input id="bEmail" type="email" required autocomplete="email" placeholder="name@school.edu"></label>
+            <label class="f"><span data-cs="Co studuješ?">What do you study?</span><select id="bLevel"><option value="zs" data-cs="Základní škola">Primary school</option><option value="ss" selected data-cs="Střední škola">High school</option><option value="vs" data-cs="Vysoká škola">University</option><option value="med" data-cs="Medicína">Medicine</option><option value="other" data-cs="Jiné">Other</option></select></label>
+            <label class="f"><span data-cs="Zařízení">Device</span><select id="bDevice"><option value="android-tablet" data-cs="Android tablet">Android tablet</option><option value="ipad">iPad</option><option value="phone" data-cs="Telefon">Phone</option><option value="pc" data-cs="Počítač">Computer</option></select></label>
+            <button class="btn primary" type="submit" id="bSend" data-cs="Přidat se">Join</button>
+            <div id="bMsg" aria-live="polite"></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Loopnote · Plzeň</span>
+    <span data-cs="Od studenta pro studenty.">By a student, for students.</span>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+(function(){
+  const CFG=window.KROUZEK||{};
+  let lang='en';try{lang=localStorage.getItem('krouzek-web-lang')||'en'}catch(e){}
+  const els=[...document.querySelectorAll('[data-cs]')];els.forEach(e=>e.dataset.en=e.textContent);
+  const STEPS={
+    android:{cs:['Otevři web v <b>Chromu</b> a ťukni na <b>Otevřít appku</b>.','<b>⋮</b> → <b>Nainstalovat aplikaci</b>.','Spusť Loopnote z plochy.'],en:['Open this site in <b>Chrome</b> and tap <b>Open the app</b>.','<b>⋮</b> → <b>Install app</b>.','Start Loopnote from your home screen.']},
+    ipad:{cs:['Otevři web v <b>Safari</b> a ťukni na <b>Otevřít appku</b>.','<b>Sdílet</b> → <b>Přidat na plochu</b>.','Spusť Loopnote z plochy.'],en:['Open this site in <b>Safari</b> and tap <b>Open the app</b>.','<b>Share</b> → <b>Add to Home Screen</b>.','Start Loopnote from your home screen.']},
+    pc:{cs:['Otevři appku v Chromu nebo Edgi.','Klikni na <b>Nainstalovat</b> v adresním řádku.'],en:['Open the app in Chrome or Edge.','Click <b>Install</b> in the address bar.']}};
+  let dev='android';
+  function renderSteps(){document.getElementById('steps').innerHTML=STEPS[dev][lang].map(s=>`<li><span>${s}</span></li>`).join('')}
+  let apply=function(){document.documentElement.lang=lang;els.forEach(e=>{e.textContent=lang==='cs'?e.dataset.cs:e.dataset.en});document.getElementById('lcs').setAttribute('aria-pressed',lang==='cs');document.getElementById('len').setAttribute('aria-pressed',lang==='en');
+    document.getElementById('bEmail').placeholder=lang==='en'?'name@school.edu':'jmeno@skola.cz';renderSteps();try{localStorage.setItem('krouzek-web-lang',lang)}catch(e){}}
+  document.getElementById('lcs').onclick=()=>{lang='cs';apply()};document.getElementById('len').onclick=()=>{lang='en';apply()};
+  document.querySelectorAll('[data-dev]').forEach(b=>b.onclick=()=>{dev=b.dataset.dev;document.querySelectorAll('[data-dev]').forEach(x=>x.setAttribute('aria-pressed',x===b));renderSteps()});
+  const appUrl=(location.protocol.startsWith('http')?location.origin+location.pathname.replace(/[^/]*$/,''):'https://krouzek.app/')+'app/';
+  document.getElementById('appUrl').textContent=appUrl.replace(/^https?:\/\//,'');document.getElementById('openApp').href=location.protocol.startsWith('http')?'app/':appUrl;
+  try{if(window.QRCode)new QRCode(document.getElementById('qr'),{text:appUrl,width:130,height:130,colorDark:'#17201d',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M})}catch(e){}
+  const f=document.getElementById('betaForm'),msg=document.getElementById('bMsg');
+  f.addEventListener('submit',async e=>{e.preventDefault();const email=document.getElementById('bEmail').value.trim();
+    if(!/^\S+@\S+\.\S+$/.test(email)){msg.innerHTML=`<p class="err">${lang==='en'?'Enter a valid email address.':'Zadej platný e-mail.'}</p>`;return}
+    if(!CFG.supabaseUrl||!CFG.anonKey){msg.innerHTML=`<p class="ok">${lang==='en'?'Preview only: the form is not connected yet. After deploying, fill in config.js and signups go to Supabase.':'Jen náhled: formulář ještě není připojený. Po nasazení vyplň config.js a přihlášky půjdou do Supabase.'}</p>`;return}
+    const btn=document.getElementById('bSend');btn.disabled=true;
+    try{const r=await fetch(CFG.supabaseUrl+'/rest/v1/waitlist',{method:'POST',headers:{'content-type':'application/json',apikey:CFG.anonKey,authorization:'Bearer '+CFG.anonKey,prefer:'return=minimal'},
+        body:JSON.stringify({email,level:document.getElementById('bLevel').value,device:document.getElementById('bDevice').value,lang})});
+      if(r.ok||r.status===409){msg.innerHTML=`<p class="ok">${r.status===409?(lang==='en'?'You are already on the list. Thanks!':'Na seznamu už jsi. Díky!'):(lang==='en'?'Done! We will write to you soon.':'Hotovo! Brzy se ti ozveme.')}</p>`;f.reset()}
+      else throw 0}
+    catch(err){msg.innerHTML=`<p class="err">${lang==='en'?'Sending failed. Check your connection and try again.':'Odeslání se nepovedlo. Zkontroluj připojení a zkus to znovu.'}</p>`}
+    finally{btn.disabled=false}});
+  /* odkazy na stažení z GitHub Releases (config.js: githubRepo: "uzivatel/repozitar") */
+  if(CFG.githubRepo)document.querySelectorAll('[data-dl]').forEach(a=>{a.href='https://github.com/'+CFG.githubRepo+'/releases/latest/download/'+a.dataset.dl});
+  /* ceny podle místa: eura v Evropě, libry ve Spojeném království, jinde dolary */
+  let tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}
+  const cur=/^Europe\/(London|Belfast|Guernsey|Isle_of_Man|Jersey)$/.test(tz)?'GBP':/^Europe\//.test(tz)?'EUR':'USD';
+  const P={EUR:{free:0,month:3.99,exam:4.99},USD:{free:0,month:3.99,exam:4.99},GBP:{free:0,month:3.49,exam:4.49}}[cur];
+  function prices(){document.querySelectorAll('[data-price]').forEach(e=>{const v=P[e.dataset.price];try{e.textContent=new Intl.NumberFormat(lang==='cs'?'cs-CZ':'en-GB',{style:'currency',currency:cur,minimumFractionDigits:v%1?2:0}).format(v)}catch(x){e.textContent=v+' '+cur}})}
+  const _apply=apply;apply=function(){_apply();prices()};
+  apply();
+})();
+</script>
+</body>
+</html>

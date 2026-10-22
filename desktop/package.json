@@ -1,0 +1,62 @@
+{
+  "name": "loopnote",
+  "productName": "Loopnote",
+  "version": "0.1.0",
+  "description": "Smart notebook for students with an AI teacher",
+  "author": "Loopnote <hello@loopnote.app>",
+  "homepage": "https://loopnote.app",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "31.7.7",
+    "electron-builder": "24.13.3"
+  },
+  "build": {
+    "appId": "app.loopnote.desktop",
+    "productName": "Loopnote",
+    "files": [
+      "main.js",
+      "preload.js",
+      "bubble.html",
+      "overlay.html",
+      "build/tray.png",
+      "www/**/*"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Loopnote-Setup.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.education",
+      "artifactName": "Loopnote-mac.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png",
+      "category": "Education",
+      "artifactName": "Loopnote-linux.${ext}"
+    },
+    "publish": null
+  }
+}

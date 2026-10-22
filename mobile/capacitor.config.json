@@ -1,0 +1,10 @@
+{
+  "appId": "app.loopnote",
+  "appName": "Loopnote",
+  "webDir": "www",
+  "backgroundColor": "#eef1ef",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true
+  }
+}

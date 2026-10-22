@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loopnote bubble</title>
+<style>
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden;user-select:none}
+  #b{position:absolute;inset:6px;border-radius:50%;background:#0f7c6b;display:grid;place-items:center;cursor:pointer;box-shadow:0 8px 18px -8px rgba(0,0,0,.55);transition:transform .12s}
+  #b:hover{transform:scale(1.06)}
+  #b svg{width:34px;height:34px;color:#fff}
+</style>
+</head>
+<body>
+<div id="b" title="Loopnote – click to circle something on screen · drag to move · triple-click to hide">
+  <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M27.5 10.2C23.6 7.4 16.8 7.6 12.4 11.3 7.3 15.6 7.3 24 11.9 28.6c4.9 4.9 13.3 4.6 17.4-1 3.4-4.6 2.6-11.2-1.8-14.7-2.6-2.1-6-2.8-9-2" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/><circle cx="31.5" cy="8.5" r="3.4" fill="#ffd43b"/></svg>
+</div>
+<script>
+  const api = window.loopnoteDesktop, b = document.getElementById("b");
+  let st = null, taps = [], t = 0;
+  b.addEventListener("pointerdown", (e) => { b.setPointerCapture(e.pointerId); st = { x: e.screenX, y: e.screenY, moved: false }; });
+  b.addEventListener("pointermove", (e) => {
+    if (!st) return;
+    const dx = e.screenX - st.x, dy = e.screenY - st.y;
+    if (!st.moved && Math.hypot(dx, dy) < 4) return;
+    st.moved = true; st.x = e.screenX; st.y = e.screenY; api.bubbleMove(dx, dy);
+  });
+  b.addEventListener("pointerup", () => {
+    if (!st) return; const moved = st.moved; st = null; if (moved) return;
+    const now = Date.now(); taps = taps.filter((x) => now - x < 900); taps.push(now); clearTimeout(t);
+    if (taps.length >= 3) { taps = []; api.bubbleOff(); return; }
+    t = setTimeout(() => { taps = []; api.bubbleClick(); }, 330);
+  });
+</script>
+</body>
+</html>

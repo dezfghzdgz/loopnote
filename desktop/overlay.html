@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loopnote – circle on screen</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;cursor:crosshair;user-select:none}
+  canvas{position:absolute;inset:0;width:100%;height:100%}
+  #hint{position:absolute;left:50%;top:22px;transform:translateX(-50%);background:rgba(15,124,107,.95);color:#fff;font:600 15px system-ui,sans-serif;padding:10px 16px;border-radius:999px;box-shadow:0 10px 24px -10px rgba(0,0,0,.6);pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">Circle what you need help with · Esc = cancel</div>
+<script>
+  const api = window.loopnoteDesktop, cv = document.getElementById("c"), ctx = cv.getContext("2d");
+  if ((navigator.language || "").startsWith("cs")) document.getElementById("hint").textContent = "Zakroužkuj, s čím chceš pomoct · Esc = zrušit";
+  let img = null, pts = [], drawing = false;
+  function size() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; paint(); }
+  function paint() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+    if (img) ctx.drawImage(img, 0, 0, cv.width, cv.height);
+    ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.fillRect(0, 0, cv.width, cv.height);
+    if (pts.length > 1) {
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      ctx.strokeStyle = "#e03131"; ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (const p of pts) ctx.lineTo(p[0], p[1]); ctx.stroke();
+    }
+  }
+  api.onShot((url) => { const i = new Image(); i.onload = () => { img = i; size(); }; i.src = url; });
+  addEventListener("resize", size);
+  addEventListener("keydown", (e) => { if (e.key === "Escape") api.overlayDone(null); });
+  cv.addEventListener("pointerdown", (e) => { cv.setPointerCapture(e.pointerId); drawing = true; pts = [[e.clientX, e.clientY]]; paint(); });
+  cv.addEventListener("pointermove", (e) => { if (!drawing) return; pts.push([e.clientX, e.clientY]); paint(); });
+  cv.addEventListener("pointerup", () => {
+    if (!drawing) return; drawing = false;
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    let x = Math.min(...xs), y = Math.min(...ys), w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+    if (w < 24 || h < 24) { pts = []; paint(); return; }
+    const pad = 16; x = Math.max(0, x - pad); y = Math.max(0, y - pad); w = Math.min(innerWidth - x, w + 2 * pad); h = Math.min(innerHeight - y, h + 2 * pad);
+    // výřez z fotky v plném rozlišení, max 1600 px
+    const kx = img.naturalWidth / innerWidth, ky = img.naturalHeight / innerHeight;
+    const sw = w * kx, sh = h * ky, k = Math.min(1, 1600 / Math.max(sw, sh));
+    const out = document.createElement("canvas"); out.width = Math.round(sw * k); out.height = Math.round(sh * k);
+    out.getContext("2d").drawImage(img, x * kx, y * ky, sw, sh, 0, 0, out.width, out.height);
+    api.overlayDone(out.toDataURL("image/jpeg", 0.9));
+  });
+</script>
+</body>
+</html>
