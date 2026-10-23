@@ -34,15 +34,22 @@ jobs:
         run: |
           npx cap add android
           npx capacitor-assets generate --android
-          # mikrofon pro rozhovor s pomocníkem
-          sed -i 's#<uses-permission android:name="android.permission.INTERNET" />#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />#' android/app/src/main/AndroidManifest.xml
+          # mikrofon + bublina přes ostatní aplikace (nativní plugin)
+          python3 ../scripts/android-native.py
           grep -q RECORD_AUDIO android/app/src/main/AndroidManifest.xml
           npx cap sync android
       - name: Build APK
         working-directory: mobile/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          # vždy stejný podpisový klíč – jinak by nová verze nešla nainstalovat přes starou
+          mkdir -p ~/.android && cp ../debug.keystore ~/.android/debug.keystore
+          # kdyby se bublina nepovedla přeložit, appka se sestaví bez ní (ať je vždy co stáhnout); napřed jeden pokus navíc kvůli výpadku sítě
+          if ! ./gradlew assembleDebug --no-daemon && ! ./gradlew assembleDebug --no-daemon; then
+            echo "::warning::Android bubble failed to compile – building without it"
+            python3 ../../scripts/android-native.py --remove
+            ./gradlew assembleDebug --no-daemon
+          fi
       - name: Rename
         run: cp mobile/android/app/build/outputs/apk/debug/app-debug.apk Loopnote-android.apk
       - uses: actions/upload-artifact@v4
