@@ -44,10 +44,11 @@ async function tts(text: string, voice: string) {
   const models = goodTts ? [goodTts, ...TTS_MODELS.filter((m) => m !== goodTts)] : TTS_MODELS;
   for (const model of models) {
     for (const k of [ttsShape, 1 - ttsShape]) {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`, {
-        method: "POST", headers: { "content-type": "application/json" },
+      let r: Response;
+      try { r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`, {
+        method: "POST", signal: AbortSignal.timeout(30000), headers: { "content-type": "application/json" },
         body: JSON.stringify({ contents: [{ role: "user", parts: [{ text }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: shapes[k] } }),
-      });
+      }); } catch (_e) { lastErr = `tts ${model}: timeout`; break; }
       const d = await r.json().catch(() => ({}));
       if (r.status === 404) { lastErr = `tts ${model}: 404`; break; }
       if (r.status === 400) { lastErr = `tts ${model}: ${(d.error && d.error.message) || 400}`; if (/model|not found|not supported/i.test(lastErr) && !/voice/i.test(lastErr)) break; continue; }
@@ -97,12 +98,22 @@ async function gemini(messages: Msg[], images: Img[], wantJson: boolean, maxToke
   if (!GEMINI_KEY) throw new Error("no_gemini");
   const contents = geminiContents(messages, images, wantJson);
   let lastErr = "", quota = false;
+  const t0 = Date.now();
   for (const model of goodModel ? [goodModel, ...GEMINI_MODELS.filter((m) => m !== goodModel)] : GEMINI_MODELS) {
     for (let attempt = 0; attempt < 2; attempt++) {
+      if (Date.now() - t0 > 75000) { lastErr = lastErr || "timeout"; break; } // celkový strop – appka nesmí čekat donekonečna
       const gc = { maxOutputTokens: maxTokens, ...(wantJson ? { responseMimeType: "application/json" } : {}), ...thinking(model, fast) };
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${onDelta ? "streamGenerateContent?alt=sse&" : "generateContent?"}key=${GEMINI_KEY}`;
-      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contents, generationConfig: gc }) });
+      // pojistka proti „zaseknutému“ spojení s Googlem: bez odpovědi do 30 s (nebo bez dalšího kousku textu 30 s) → další model
+      const ac = new AbortController();
+      let idle = setTimeout(() => ac.abort(), 30000);
+      const poke = () => { clearTimeout(idle); idle = setTimeout(() => ac.abort(), 30000); };
+      let r: Response;
+      try { r = await fetch(url, { method: "POST", signal: ac.signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ contents, generationConfig: gc }) }); }
+      catch (_e) { clearTimeout(idle); lastErr = `gemini ${model}: timeout`; break; }
+      if (!onDelta) { clearTimeout(idle); idle = setTimeout(() => ac.abort(), 45000); }
       if (!r.ok) {
+        clearTimeout(idle);
         const d = await r.json().catch(() => ({}));
         const msg = JSON.stringify(d);
         if (r.status === 400 && /thinking/i.test(msg) && !noThink.has(model)) { noThink.add(model); continue; } // bez nastavení přemýšlení
@@ -111,19 +122,24 @@ async function gemini(messages: Msg[], images: Img[], wantJson: boolean, maxToke
         if (r.status === 429 || r.status >= 500) { lastErr = `gemini ${model} ${r.status}: ${(d.error && d.error.message) || ""}`.slice(0, 300); quota = quota || r.status === 429; break; }
         throw new Error(`gemini ${model} ${r.status}: ${(d.error && d.error.message) || msg.slice(0, 200)}`);
       }
-      goodModel = model;
       if (!onDelta) {
-        const d = await r.json().catch(() => ({}));
+        const d = await r.json().catch(() => null);
+        clearTimeout(idle);
+        if (!d) { lastErr = `gemini ${model}: timeout`; break; }
+        goodModel = model;
         const c = d.candidates?.[0];
         if (!c || c.finishReason === "SAFETY" || c.finishReason === "PROHIBITED_CONTENT") throw new Error("refused");
         return (c.content?.parts ?? []).filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
       }
       // stream: řádky "data: {...}" od Google → text po kouscích
       const reader = r.body!.getReader(), dec = new TextDecoder();
-      let buf = "", full = "", refused = false;
+      let buf = "", full = "", refused = false, cut = false;
       for (;;) {
-        const { value, done } = await reader.read();
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try { chunk = await reader.read(); } catch (_e) { cut = true; break; }
+        const { value, done } = chunk;
         if (done) break;
+        poke();
         buf += dec.decode(value, { stream: true });
         let i;
         while ((i = buf.indexOf("\n")) >= 0) {
@@ -138,17 +154,22 @@ async function gemini(messages: Msg[], images: Img[], wantJson: boolean, maxToke
           } catch { /* neúplný řádek */ }
         }
       }
+      clearTimeout(idle);
       if (refused && !full) throw new Error("refused");
+      if (cut && !full) { lastErr = `gemini ${model}: timeout`; break; } // nic nepřišlo → zkusit další model
+      goodModel = model;
       return full;
     }
   }
   if (quota) throw new Error("busy: " + lastErr);
+  if (/timeout/.test(lastErr)) throw new Error("timeout: " + lastErr);
   throw new Error("no Gemini model available (" + lastErr + ")");
 }
 // srozumitelná chyba pro appku: busy = vyčerpaný limit u Googlu (bezplatná úroveň má jen pár dotazů za minutu/den)
-function errCode(m: string) { return m === "refused" ? "refused" : m.startsWith("busy") ? "busy" : m === "invalid_json" ? "invalid_json" : "unavailable"; }
+function errCode(m: string) { return m === "refused" ? "refused" : m.startsWith("busy") ? "busy" : m.startsWith("timeout") ? "timeout" : m === "invalid_json" ? "invalid_json" : "unavailable"; }
 function errDetail(m: string) {
   if (!GEMINI_KEY) return "GEMINI_API_KEY is missing in Supabase → Edge Functions → Secrets";
+  if (m.startsWith("timeout")) return "Google Gemini did not answer in time (connection stalled). " + m.slice(9, 200);
   if (m.startsWith("busy")) return "Google Gemini quota exceeded (free tier = few requests per minute/day). Fix: aistudio.google.com → Billing → set up billing (Tier 1). " + m.slice(6, 200);
   return m.slice(0, 300);
 }
@@ -188,7 +209,8 @@ Deno.serve(async (req) => {
   const audio = body.audio && body.audio.data && body.audio.data.length < 12_000_000 ? body.audio : null;
   if (audio) images.push(audio);
   const isStt = body.purpose === "stt";
-  const isWatch = body.purpose === "watch"; // hlídání chyb při psaní – vlastní limit, nepočítá se do dotazů
+  const isCheck = body.purpose === "check"; // test spojení z Nastavení – ukáže, co přesně Google vrací
+  const isWatch = body.purpose === "watch" || isCheck; // hlídání chyb při psaní – vlastní limit, nepočítá se do dotazů
   // přepis řeči: jen jedna zpráva a jen zvuk (ať se přes něj neobchází limit dotazů)
   if (isStt && (!audio || images.length !== 1 || messages.length !== 1)) return json({ code: "bad_request" }, 400);
   const tier = body.tier ?? "default";
@@ -216,6 +238,26 @@ Deno.serve(async (req) => {
     const { data: n, error } = await sb.rpc("bump_usage", { p_k: (isUi ? "ui:" : "") + key });
     if (!error && typeof n === "number" && n > (isUi ? UI_LIMIT : FREE_LIMIT)) return json({ code: "usage" }, 429);
   }
+  if (isCheck) {
+    if (!GEMINI_KEY) return json({ ok: false, detail: errDetail("no_gemini"), tried: [] });
+    const tried: { model: string; status: number | string; ms: number; msg?: string }[] = [];
+    let ok = "";
+    for (const model of GEMINI_MODELS) {
+      const t = Date.now();
+      try {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`, {
+          method: "POST", signal: AbortSignal.timeout(25000), headers: { "content-type": "application/json" },
+          body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with the single word: ok" }] }], generationConfig: { maxOutputTokens: 400 } }),
+        });
+        const d = await r.json().catch(() => ({}));
+        tried.push({ model, status: r.status, ms: Date.now() - t, msg: r.ok ? undefined : String((d.error && d.error.message) || "").slice(0, 160) });
+        if (r.ok) { ok = model; goodModel = model; break; }
+      } catch (_e) { tried.push({ model, status: "timeout", ms: Date.now() - t }); }
+    }
+    let voice = "";
+    if (ok) { try { await tts("Ok.", "Kore"); voice = "ok"; } catch (e) { voice = String((e as Error).message || e).slice(0, 200); } }
+    return json({ ok: !!ok, model: ok, voice, tried });
+  }
   if (isTts) {
     const text = messages[0].content.trim().slice(0, 1500);
     if (!text) return json({ code: "bad_request" }, 400);
@@ -240,6 +282,7 @@ Deno.serve(async (req) => {
       async start(ctrl) {
         const send = (o: unknown) => ctrl.enqueue(enc.encode("data: " + JSON.stringify(o) + "\n\n"));
         let sent = false;
+        const ping = setInterval(() => { try { ctrl.enqueue(enc.encode(": ping\n\n")); } catch (_e) { /* zavřeno */ } }, 8000);
         try {
           await gemini(messages, images, false, maxTokens, fast, (t) => { sent = true; send({ t }); });
           send({ done: true });
@@ -247,11 +290,12 @@ Deno.serve(async (req) => {
           const m = String((e as Error).message || e);
           // když Gemini selže ještě před prvním slovem, zkusí se Claude (bez streamu)
           if (!sent && m !== "refused" && CLAUDE_KEY) {
-            try { send({ t: await claude(messages, images, false, maxTokens) }); send({ done: true }); ctrl.close(); return; } catch (e2) { console.error(e2); }
+            try { send({ t: await claude(messages, images, false, maxTokens) }); send({ done: true }); clearInterval(ping); ctrl.close(); return; } catch (e2) { console.error(e2); }
           }
           console.error(m);
           send({ error: errCode(m), detail: errDetail(m) });
         }
+        clearInterval(ping);
         ctrl.close();
       },
     });

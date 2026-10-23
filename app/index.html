@@ -753,7 +753,7 @@ function accFromHash(){const h=new URLSearchParams(location.hash.slice(1));const
 /* obnovení přihlášení: odhlásí jen při neplatném tokenu, ne když zrovna nejde internet; najednou běží jen jedno */
 let ACC_REF=null;
 async function accToken(){if(!HAS_API||!ACC.s)return null;if(Date.now()<=ACC.s.exp-60e3)return ACC.s.at;
-  if(!ACC_REF)ACC_REF=(async()=>{const s0=ACC.s;let r;try{r=await fetch(KCFG.supabaseUrl+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:KCFG.anonKey,'content-type':'application/json'},body:JSON.stringify({refresh_token:s0.rt})})}catch(e){return null}
+  if(!ACC_REF)ACC_REF=(async()=>{const s0=ACC.s;let r;try{r=await fetch(KCFG.supabaseUrl+'/auth/v1/token?grant_type=refresh_token',{method:'POST',signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined,headers:{apikey:KCFG.anonKey,'content-type':'application/json'},body:JSON.stringify({refresh_token:s0.rt})})}catch(e){return null}
     if(r.status===400||r.status===401||r.status===403){if(ACC.s===s0){ACC.s=null;accSave()}return null}if(!r.ok)return null;
     const d=await r.json().catch(()=>null);if(!d||!d.access_token)return null;ACC.s={at:d.access_token,rt:d.refresh_token,exp:Date.now()+d.expires_in*1000,email:(d.user&&d.user.email)||s0.email};accSave();return ACC.s.at})().finally(()=>{ACC_REF=null});
   return ACC_REF}
@@ -777,17 +777,20 @@ function apiSample(){let dev='x';try{dev=localStorage.getItem('krouzek-dev');if(
       return await new Promise(r=>cv.toBlob(x=>r(x||b),'image/jpeg',.85))}catch(e){return b}};
   const b64=b=>shrink(b).then(b=>new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res({mime:b.type||'image/jpeg',data:String(fr.result).split(',')[1]});fr.onerror=rej;fr.readAsDataURL(b)}));
   async function call(input,opts,json){opts=opts||{};const messages=typeof input==='string'?[{role:'user',content:input}]:input.map(m=>({role:m.role,content:String(m.content)}));
-    const imgs=opts.images?(await Promise.all(opts.images)).filter(Boolean):[];const images=await Promise.all(imgs.map(b64));const tok=await accToken();let r;
-    try{r=await fetch(KCFG.supabaseUrl+'/functions/v1/ai',{method:'POST',signal:opts.signal,headers:{'content-type':'application/json',apikey:KCFG.anonKey,authorization:'Bearer '+(tok||KCFG.anonKey),'x-device':dev},
+    AI_DETAIL='';const imgs=opts.images?(await Promise.all(opts.images)).filter(Boolean):[];const images=await Promise.all(imgs.map(b64));const tok=await accToken();let r;
+    const ctl=new AbortController();let tmo=false;let wd=setTimeout(()=>{tmo=true;ctl.abort()},!json&&opts.onText?45000:120000);const kick=()=>{clearTimeout(wd);wd=setTimeout(()=>{tmo=true;ctl.abort()},40000)};
+    if(opts.signal){if(opts.signal.aborted)ctl.abort();else opts.signal.addEventListener('abort',()=>ctl.abort(),{once:true})}
+    try{r=await fetch(KCFG.supabaseUrl+'/functions/v1/ai',{method:'POST',signal:ctl.signal,headers:{'content-type':'application/json',apikey:KCFG.anonKey,authorization:'Bearer '+(tok||KCFG.anonKey),'x-device':dev},
       body:JSON.stringify({messages,images,tier:opts.modelTier||'default',json,purpose:opts.purpose||'',lang:LANG(),stream:!json&&!!opts.onText})})}
-    catch(e){throw {code:e&&e.name==='AbortError'?'cancelled':'offline'}}
+    catch(e){clearTimeout(wd);throw {code:tmo?'timeout':e&&e.name==='AbortError'?'cancelled':'offline'}}
     // průběžná odpověď: text se ukazuje, jak vzniká
     if(r.ok&&/event-stream/.test(r.headers.get('content-type')||'')){const rd=r.body.getReader(),dec=new TextDecoder();let buf='',text='';
-      try{for(;;){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
+      try{kick();for(;;){const {value,done}=await rd.read();if(done)break;kick();buf+=dec.decode(value,{stream:true});let i;
         while((i=buf.indexOf('\n\n'))>=0){const ev=buf.slice(0,i);buf=buf.slice(i+2);const line=ev.split('\n').find(l=>l.startsWith('data:'));if(!line)continue;let o;try{o=JSON.parse(line.slice(5))}catch(e){continue}
           if(o.error){AI_DETAIL=o.detail||'';throw {code:o.error,text}}if(o.t){text+=o.t;try{opts.onText({text})}catch(e){}}}}}
-      catch(e){if(e&&e.code)throw e;throw {code:opts.signal&&opts.signal.aborted?'cancelled':'offline',text}}
-      return {text,streamed:true}}
+      catch(e){clearTimeout(wd);if(e&&e.code)throw e;throw {code:tmo?'timeout':opts.signal&&opts.signal.aborted?'cancelled':'offline',text}}
+      clearTimeout(wd);return {text,streamed:true}}
+    clearTimeout(wd);
     const d=await r.json().catch(()=>({}));if(!r.ok){AI_DETAIL=d.detail||d.message||d.msg||d.error||('HTTP '+r.status);throw {code:d.code||'unavailable'}}return d}
   const sample=async(input,opts)=>{const d=await call(input,opts,false);if(opts&&opts.onText&&!d.streamed)opts.onText({text:d.text||''});return {text:d.text||''}};
   sample.json=async(input,opts)=>{const d=await call(input,opts,true);return d.json};return sample}
@@ -1280,7 +1283,7 @@ function settingsDialog(focus){closeRemBanner();const p=S.profile,f=S.prefs;let 
     <div class="group"><span class="eyebrow">Výchozí pomoc</span><div class="opts c2">${modeOpts(p)}</div></div>
     <div class="group"><span class="eyebrow">AI model</span><div class="opts c3">${Object.entries(AIS).map(([k,v])=>`<button type="button" class="opt" data-ai="${k}" aria-pressed="${p.ai===k}"><b>${v.n}</b><small>${v.d}</small></button>`).join('')}</div>
       <p class="fine" style="margin:0">${HAS_API?L('Odpovídá Gemini. U Loopnote Plus může volba Nejchytřejší běžet na Claudovi.','Answers come from Gemini. With Loopnote Plus, Smartest can run on Claude.'):'V tomhle prototypu odpovídá Claude. V hotové appce se pod těmito třemi volbami schovají levnější modely (např. Gemini Flash).'}</p></div>
-    ${accountHTML()}${androidBubbleHTML()}<div class="group"><span class="eyebrow">Tvoje data</span><div class="promise"><b>Zápisky patří tobě.</b>Kdykoli si je stáhneš jako PDF nebo celou zálohu a přeneseš je jinam. Žádná funkce, kterou máš, ti nezmizí za paywall.</div>
+    ${accountHTML()}${androidBubbleHTML()}${aiCheckHTML()}<div class="group"><span class="eyebrow">Tvoje data</span><div class="promise"><b>Zápisky patří tobě.</b>Kdykoli si je stáhneš jako PDF nebo celou zálohu a přeneseš je jinam. Žádná funkce, kterou máš, ti nezmizí za paywall.</div>
       <div class="row"><button type="button" class="btn" data-backup>Stáhnout zálohu (.json)</button><button type="button" class="btn" data-import>Obnovit ze zálohy</button><button type="button" class="btn plus" data-plans>Loopnote Plus</button></div></div>
     <div class="group"><span class="eyebrow">Psaní</span>
       <button type="button" class="toggle" data-tg="watch" aria-pressed="${f.watch!==false}"><span><b>${L('Hlídat chyby při psaní','Watch for mistakes as I write')}</b><small>${L('Když se při psaní zastavíš, pomocník mrkne na nový zápis. Když vidí chybu, dá na okraj červenou tečku – ťukneš a poradí.','When you pause, the helper glances at what you just wrote. If it spots a mistake, a red dot appears in the margin – tap it for a hint.')}</small></span><span class="knob"></span></button>
@@ -1832,7 +1835,7 @@ function commitText(){if(!TE)return;const {v,ta,x,y,obj,size,font,color}=TE;TE=n
   else if(text){pushHistory(v.pg);const to={id:uid(),type:'text',x,y,text,size,color,font};stampRec(to);v.pg.objs.push(to);changed(v)}}
 
 /* ---------- AI: převod rukopisu ---------- */
-function errCopy0(code){return ({busy:L('AI má teď moc dotazů najednou (limit u Googlu). Zkus to za minutku.','The AI is getting too many requests right now (Google limit). Try again in a minute.'),usage:L('Dnešní dotazy zdarma došly. Zítra se obnoví, nebo si zapni Loopnote Plus.','You have used today\'s free questions. They reset tomorrow, or get Loopnote Plus.'),offline:L('Jsi offline. Pomocník potřebuje internet.','You are offline. The helper needs internet.'),not_granted:'Pomocník nemá povolený přístup k Claude. Načti stránku znovu a přístup povol.',sampling_disabled:'Claude teď pro tvůj účet není dostupný.',rate_limited:'Moc dotazů najednou. Zkus to za chvilku.',
+function errCopy0(code){return ({timeout:L('AI neodpověděla včas (spojení se zaseklo). Zkus to znovu.','The AI didn’t answer in time (the connection stalled). Try again.'),busy:L('AI má teď moc dotazů najednou (limit u Googlu). Zkus to za minutku.','The AI is getting too many requests right now (Google limit). Try again in a minute.'),usage:L('Dnešní dotazy zdarma došly. Zítra se obnoví, nebo si zapni Loopnote Plus.','You have used today\'s free questions. They reset tomorrow, or get Loopnote Plus.'),offline:L('Jsi offline. Pomocník potřebuje internet.','You are offline. The helper needs internet.'),not_granted:'Pomocník nemá povolený přístup k Claude. Načti stránku znovu a přístup povol.',sampling_disabled:'Claude teď pro tvůj účet není dostupný.',rate_limited:'Moc dotazů najednou. Zkus to za chvilku.',
   session_expired:'Přihlas se znovu do Claude a zkus to.',refused:'Pomocník tohle odmítl. Zkus zakroužkovat menší část nebo napiš, k čemu to potřebuješ (třeba „učím se na zkoušku z anatomie“).',image_rejected:'Výřez se nepodařilo poslat. Zkus menší oblast.',
   images_unavailable:'Tohle zobrazení neumí poslat obrázek pomocníkovi. Otevři prototyp v aplikaci Claude.',invalid_json:'Rukopis se nepodařilo přečíst. Zkus označit méně textu.',empty:'Na výřezu jsem nenašel žádný text.'})[code]||'Spojení se přerušilo. Zkus to znovu.'}
 function cropBlob(v,b,opt={}){const k=clamp(1400/Math.max(b.w,b.h),1,2.6);const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(b.w*k));cv.height=Math.max(1,Math.round(b.h*k));const c=cv.getContext('2d');
@@ -3573,6 +3576,22 @@ function vxSample(btn){if(btn){btn.classList.add('vx-loading');btn.setAttribute(
   const off=()=>{if(btn){btn.classList.remove('vx-loading');btn.removeAttribute('aria-busy')}};
   VX.onPlay=off;speak(VX_SAMPLE(),off);setTimeout(off,20000)}
 (function(){try{const st=document.createElement('style');st.textContent='.vx-loading{position:relative;opacity:.75;pointer-events:none}.vx-loading::after{content:"";position:absolute;right:8px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:vxspin .7s linear infinite}@keyframes vxspin{to{transform:rotate(360deg)}}';document.head.appendChild(st)}catch(e){}})();
+
+/* Nastavení → Test spojení s AI: ukáže přesně, co vrací Google (limit, zaseknutí, chybějící klíč…) */
+function aiCheckHTML(){if(!HAS_API)return '';return `<div class="group" id="aiChk"><span class="eyebrow">${L('Spojení s AI','AI connection')}</span>
+  <p class="fine" style="margin:0">${L('Když pomocník neodpovídá, tady zjistíš proč.','If the helper doesn’t answer, find out why here.')}</p>
+  <div class="row"><button type="button" class="btn" data-aichk>${L('Otestovat spojení','Test connection')}</button></div><div id="aiChkOut" class="fine" style="white-space:pre-wrap;user-select:text"></div></div>`}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-aichk]');if(!b)return;const out=document.getElementById('aiChkOut');b.classList.add('vx-loading');out.textContent=L('Testuju… (může to trvat až minutu)','Testing… (can take up to a minute)');
+  const t0=Date.now();let txt='';
+  try{const d=await vxApi({purpose:'check',messages:[{role:'user',content:'check'}]},null,180000);
+    const sec=((Date.now()-t0)/1000).toFixed(1);
+    txt=(d.ok?'✅ '+L('AI funguje','AI works')+' ('+d.model+', '+sec+' s)':'❌ '+L('AI nefunguje','AI is not working'))+'\n'+
+      (d.ok?(d.voice==='ok'?'✅ '+L('Hlas funguje','Voice works'):'⚠️ '+L('Hlas: ','Voice: ')+d.voice)+'\n':'')+
+      (d.detail?d.detail+'\n':'')+
+      (d.tried||[]).map(x=>'· '+x.model+': '+x.status+(x.msg?' – '+x.msg:'')+' ('+x.ms+' ms)').join('\n');
+    if((d.tried||[]).some(x=>x.status===429))txt+='\n\n'+L('429 = vyčerpaný limit u Googlu. Řešení: aistudio.google.com → Billing → zapnout placený tarif (Tier 1).','429 = Google quota used up. Fix: aistudio.google.com → Billing → enable a paid tier (Tier 1).')}
+  catch(err){txt='❌ '+(err&&err.code==='offline'?L('Server s AI neodpověděl (nebo není nasazená funkce „ai“).','The AI server didn’t respond (or the “ai” function isn’t deployed).'):errCopy(err&&err.code))}
+  b.classList.remove('vx-loading');out.textContent=txt},true);
 
 /* ===== Účet a synchronizace: přihlášení kódem z e-mailu, sešity na všech zařízeních, sdílení se spolužáky ===== */
 const SYNCUI={step:'email',email:'',busy:false,err:''};
