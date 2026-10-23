@@ -22,7 +22,8 @@ const json = (body: unknown, status = 200) =>
 const env = (k: string, d = "") => Deno.env.get(k) ?? d;
 const GEMINI_KEY = env("GEMINI_API_KEY");
 // modely se zkouší popořadě – když některý Google zrovna nemá (404), vezme se další
-const GEMINI_MODELS = [env("GEMINI_MODEL"), "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"].filter(Boolean);
+// každý model má u Googlu vlastní limit – když je jeden vyčerpaný (429), zkusí se další
+const GEMINI_MODELS = [env("GEMINI_MODEL"), "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.8-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"].filter(Boolean);
 let goodModel = "";
 const CLAUDE_KEY = env("ANTHROPIC_API_KEY");
 const CLAUDE_MODEL = env("ANTHROPIC_MODEL", "claude-sonnet-5-5");
@@ -58,6 +59,7 @@ async function tts(text: string, voice: string) {
       return { audio: inl.data as string, mime: (inl.mimeType || inl.mime_type || "audio/L16;rate=24000") as string };
     }
   }
+  if (/ 429/.test(lastErr)) throw new Error("busy: " + lastErr);
   throw new Error("no TTS model available (" + lastErr + ")");
 }
 
@@ -94,7 +96,7 @@ function geminiContents(messages: Msg[], images: Img[], wantJson: boolean) {
 async function gemini(messages: Msg[], images: Img[], wantJson: boolean, maxTokens: number, fast = true, onDelta?: (t: string) => void) {
   if (!GEMINI_KEY) throw new Error("no_gemini");
   const contents = geminiContents(messages, images, wantJson);
-  let lastErr = "";
+  let lastErr = "", quota = false;
   for (const model of goodModel ? [goodModel, ...GEMINI_MODELS.filter((m) => m !== goodModel)] : GEMINI_MODELS) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const gc = { maxOutputTokens: maxTokens, ...(wantJson ? { responseMimeType: "application/json" } : {}), ...thinking(model, fast) };
@@ -104,7 +106,9 @@ async function gemini(messages: Msg[], images: Img[], wantJson: boolean, maxToke
         const d = await r.json().catch(() => ({}));
         const msg = JSON.stringify(d);
         if (r.status === 400 && /thinking/i.test(msg) && !noThink.has(model)) { noThink.add(model); continue; } // bez nastavení přemýšlení
-        if (r.status === 404 || (r.status === 400 && /model|not found|not supported/i.test(msg))) { lastErr = `gemini ${model}: ${r.status}`; break; }
+        if (r.status === 404 || (r.status === 400 && /model|not found|not supported/i.test(msg))) { lastErr = lastErr || `gemini ${model}: ${r.status}`; break; }
+        // 429 = vyčerpaný limit tohoto modelu (každý model má vlastní) → zkusit další; 5xx = přetížené → taky další
+        if (r.status === 429 || r.status >= 500) { lastErr = `gemini ${model} ${r.status}: ${(d.error && d.error.message) || ""}`.slice(0, 300); quota = quota || r.status === 429; break; }
         throw new Error(`gemini ${model} ${r.status}: ${(d.error && d.error.message) || msg.slice(0, 200)}`);
       }
       goodModel = model;
@@ -138,7 +142,15 @@ async function gemini(messages: Msg[], images: Img[], wantJson: boolean, maxToke
       return full;
     }
   }
+  if (quota) throw new Error("busy: " + lastErr);
   throw new Error("no Gemini model available (" + lastErr + ")");
+}
+// srozumitelná chyba pro appku: busy = vyčerpaný limit u Googlu (bezplatná úroveň má jen pár dotazů za minutu/den)
+function errCode(m: string) { return m === "refused" ? "refused" : m.startsWith("busy") ? "busy" : m === "invalid_json" ? "invalid_json" : "unavailable"; }
+function errDetail(m: string) {
+  if (!GEMINI_KEY) return "GEMINI_API_KEY is missing in Supabase → Edge Functions → Secrets";
+  if (m.startsWith("busy")) return "Google Gemini quota exceeded (free tier = few requests per minute/day). Fix: aistudio.google.com → Billing → set up billing (Tier 1). " + m.slice(6, 200);
+  return m.slice(0, 300);
 }
 async function claude(messages: Msg[], images: Img[], wantJson: boolean, maxTokens: number) {
   if (!CLAUDE_KEY) throw new Error("no_claude");
@@ -210,7 +222,7 @@ Deno.serve(async (req) => {
     try { return json(await tts(text, String(body.voice || ""))); }
     catch (e) {
       const m = String((e as Error).message || e); console.error(m);
-      return json({ code: "unavailable", detail: !GEMINI_KEY ? "GEMINI_API_KEY is missing in Supabase → Edge Functions → Secrets" : m.slice(0, 300) }, 502);
+      return json({ code: errCode(m), detail: errDetail(m) }, m.startsWith("busy") ? 429 : 502);
     }
   }
 
@@ -238,7 +250,7 @@ Deno.serve(async (req) => {
             try { send({ t: await claude(messages, images, false, maxTokens) }); send({ done: true }); ctrl.close(); return; } catch (e2) { console.error(e2); }
           }
           console.error(m);
-          send({ error: m === "refused" ? "refused" : "unavailable", detail: !GEMINI_KEY ? "GEMINI_API_KEY is missing in Supabase → Edge Functions → Secrets" : m.slice(0, 300) });
+          send({ error: errCode(m), detail: errDetail(m) });
         }
         ctrl.close();
       },
@@ -260,6 +272,5 @@ Deno.serve(async (req) => {
       console.error(lastErr);
     }
   }
-  const detail = !GEMINI_KEY ? "GEMINI_API_KEY is missing in Supabase → Edge Functions → Secrets" : lastErr.slice(0, 300);
-  return json({ code: lastErr === "invalid_json" ? "invalid_json" : "unavailable", detail }, 502);
+  return json({ code: errCode(lastErr), detail: errDetail(lastErr) }, lastErr.startsWith("busy") ? 429 : 502);
 });

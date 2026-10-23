@@ -40,6 +40,7 @@ Co je v repozitáři:
    - název `referral` → vlož `supabase/functions/referral/index.ts` → Deploy
 5. **Edge Functions → Secrets** – přidej:
    - `GEMINI_API_KEY` – klíč z [aistudio.google.com](https://aistudio.google.com) → Get API key
+     - ⚠️ Zdarma má Google jen pár dotazů za minutu a ~20 za den – na to appka nestačí (chyba „429 / exceeded your current quota“). V AI Studiu zapni **Billing** (Tier 1) a nastav si rozpočet/upozornění. Klíč zůstává stejný, nic dalšího se nemění.
    - `SITE_URL` – adresa webu z Vercelu, např. `https://krouzek.vercel.app` (bez lomítka na konci)
    - volitelně `ANTHROPIC_API_KEY` – pak volba „Nejchytřejší“ u Plus běží na Claudovi
    - volitelně `FREE_LIMIT` (výchozí 10 dotazů denně zdarma), `GEMINI_MODEL` (výchozí `gemini-3.6-flash`)

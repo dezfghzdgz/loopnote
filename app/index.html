@@ -11,6 +11,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="alternate icon" href="../favicon.ico">
 <script src="../config.js"></script>
 <title>Loopnote</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -1830,7 +1832,7 @@ function commitText(){if(!TE)return;const {v,ta,x,y,obj,size,font,color}=TE;TE=n
   else if(text){pushHistory(v.pg);const to={id:uid(),type:'text',x,y,text,size,color,font};stampRec(to);v.pg.objs.push(to);changed(v)}}
 
 /* ---------- AI: převod rukopisu ---------- */
-function errCopy0(code){return ({usage:L('Dnešní dotazy zdarma došly. Zítra se obnoví, nebo si zapni Loopnote Plus.','You have used today\'s free questions. They reset tomorrow, or get Loopnote Plus.'),offline:L('Jsi offline. Pomocník potřebuje internet.','You are offline. The helper needs internet.'),not_granted:'Pomocník nemá povolený přístup k Claude. Načti stránku znovu a přístup povol.',sampling_disabled:'Claude teď pro tvůj účet není dostupný.',rate_limited:'Moc dotazů najednou. Zkus to za chvilku.',
+function errCopy0(code){return ({busy:L('AI má teď moc dotazů najednou (limit u Googlu). Zkus to za minutku.','The AI is getting too many requests right now (Google limit). Try again in a minute.'),usage:L('Dnešní dotazy zdarma došly. Zítra se obnoví, nebo si zapni Loopnote Plus.','You have used today\'s free questions. They reset tomorrow, or get Loopnote Plus.'),offline:L('Jsi offline. Pomocník potřebuje internet.','You are offline. The helper needs internet.'),not_granted:'Pomocník nemá povolený přístup k Claude. Načti stránku znovu a přístup povol.',sampling_disabled:'Claude teď pro tvůj účet není dostupný.',rate_limited:'Moc dotazů najednou. Zkus to za chvilku.',
   session_expired:'Přihlas se znovu do Claude a zkus to.',refused:'Pomocník tohle odmítl. Zkus zakroužkovat menší část nebo napiš, k čemu to potřebuješ (třeba „učím se na zkoušku z anatomie“).',image_rejected:'Výřez se nepodařilo poslat. Zkus menší oblast.',
   images_unavailable:'Tohle zobrazení neumí poslat obrázek pomocníkovi. Otevři prototyp v aplikaci Claude.',invalid_json:'Rukopis se nepodařilo přečíst. Zkus označit méně textu.',empty:'Na výřezu jsem nenašel žádný text.'})[code]||'Spojení se přerušilo. Zkus to znovu.'}
 function cropBlob(v,b,opt={}){const k=clamp(1400/Math.max(b.w,b.h),1,2.6);const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(b.w*k));cv.height=Math.max(1,Math.round(b.h*k));const c=cv.getContext('2d');
@@ -3420,17 +3422,25 @@ async function vxApi(body,signal,ms){const tok=await accToken();let r;const ctl=
 function b64ToBytes(b){const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u}
 function wavHeader(n,rate){const h=new DataView(new ArrayBuffer(44));const w=(o,s)=>{for(let i=0;i<s.length;i++)h.setUint8(o+i,s.charCodeAt(i))};
   w(0,'RIFF');h.setUint32(4,36+n,true);w(8,'WAVE');w(12,'fmt ');h.setUint32(16,16,true);h.setUint16(20,1,true);h.setUint16(22,1,true);h.setUint32(24,rate,true);h.setUint32(28,rate*2,true);h.setUint16(32,2,true);h.setUint16(34,16,true);w(36,'data');h.setUint32(40,n,true);return new Uint8Array(h.buffer)}
-async function ttsUrl(text,signal){const d=await vxApi({purpose:'tts',text,voice:vxVoice()},signal);if(!d.audio)throw {code:'unavailable'};
+/* krátké věty (potvrzení, ukázky hlasu) se ukládají v zařízení – podruhé zazní hned a nešetří limit u Googlu */
+const VXC={db:null};
+function vxcDb(){if(VXC.db)return VXC.db;VXC.db=new Promise(res=>{try{const r=indexedDB.open('loopnote-tts',1);r.onupgradeneeded=()=>r.result.createObjectStore('a');r.onsuccess=()=>res(r.result);r.onerror=()=>res(null)}catch(e){res(null)}});return VXC.db}
+async function vxcGet(k){const db=await vxcDb();if(!db)return null;return new Promise(res=>{try{const q=db.transaction('a').objectStore('a').get(k);q.onsuccess=()=>res(q.result||null);q.onerror=()=>res(null)}catch(e){res(null)}})}
+async function vxcPut(k,blob){const db=await vxcDb();if(!db)return;try{const st=db.transaction('a','readwrite').objectStore('a');st.put({blob,t:Date.now()},k);
+  const c=st.count();c.onsuccess=()=>{if(c.result>80){const all=st.getAll();all.onsuccess=()=>{const ks=st.getAllKeys();ks.onsuccess=()=>{all.result.map((v,i)=>[v.t,ks.result[i]]).sort((a,b)=>a[0]-b[0]).slice(0,c.result-60).forEach(x=>st.delete(x[1]))}}}}}catch(e){}}
+async function ttsUrl(text,signal){const ck=text.length<=160?'v1|'+vxVoice()+'|'+text:null;
+  if(ck){const hit=await vxcGet(ck);if(hit&&hit.blob){const u=URL.createObjectURL(hit.blob);VX.urls.add(u);return u}}
+  const d=await vxApi({purpose:'tts',text,voice:vxVoice()},signal);if(!d.audio)throw {code:'unavailable'};
   const bytes=b64ToBytes(d.audio),mime=String(d.mime||'');let blob;
   if(/wav/i.test(mime)||(bytes[0]===82&&bytes[1]===73&&bytes[2]===70&&bytes[3]===70))blob=new Blob([bytes],{type:'audio/wav'});
   else{const rate=+((mime.match(/rate=(\d+)/)||[])[1])||24000;blob=new Blob([wavHeader(bytes.length,rate),bytes],{type:'audio/wav'})}
-  const u=URL.createObjectURL(blob);VX.urls.add(u);return u}
+  if(ck)vxcPut(ck,blob);const u=URL.createObjectURL(blob);VX.urls.add(u);return u}
 function vxChunks(text){const t=speakable(text);if(!t)return [];const out=[];let cur='';
-  for(const s of t.match(/[^.!?…;]+[.!?…;]*\s*/g)||[t]){const lim=out.length?520:170;if((cur+s).length>lim&&cur.trim()){out.push(cur.trim());cur=s}else cur+=s}
+  for(const s of t.match(/[^.!?…;]+[.!?…;]*\s*/g)||[t]){const lim=out.length?1400:170;if((cur+s).length>lim&&cur.trim()){out.push(cur.trim());cur=s}else cur+=s}
   if(cur.trim())out.push(cur.trim());return out}
 function vxFree(u){if(u&&VX.urls.has(u)){URL.revokeObjectURL(u);VX.urls.delete(u)}}
 function vxPlay(url,g){return new Promise(res=>{if(VX.gen!==g){vxFree(url);res();return}const a=new Audio(url);VX.audio=a;a.playbackRate=clamp((S.prefs.voice||{}).rate||1,.7,1.4);
-  let fin=false;const done=()=>{if(fin)return;fin=true;vxFree(url);if(VX.audio===a)VX.audio=null;if(VX.playRes===done)VX.playRes=null;res()};VX.playRes=done;a.onended=done;a.onerror=done;a.play().catch(done)})}
+  let fin=false;const done=()=>{if(fin)return;fin=true;vxFree(url);if(VX.audio===a)VX.audio=null;if(VX.playRes===done)VX.playRes=null;res()};VX.playRes=done;a.onended=done;a.onerror=done;a.onplaying=()=>{const f=VX.onPlay;VX.onPlay=null;f&&f()};a.play().catch(done)})}
 /* čtení nahlas: přirozený hlas ze serveru, při chybě hlas zařízení */
 function speak(t,onEnd0){stopSpeak();let fired=false;const onEnd=()=>{if(fired)return;fired=true;if(VX.onEnd===onEnd)VX.onEnd=null;onEnd0&&onEnd0()};VX.onEnd=onEnd;
   if(!VX_ON()){speakDevice(t);vxWaitDevice(onEnd);return}
@@ -3455,7 +3465,7 @@ function speakStream(before){stopSpeak(true);const g=++VX.gen,cloud=VX_ON();let 
   const cut=(text,final)=>{full=text;if(final){push(text.slice(sent));sent=text.length;return}
     // hotová věta (nebo řádek); první kousek klidně krátký, ať hlas začne co nejdřív
     const rest=text.slice(sent),re=/[.!?…](\s|$)|\n/g;let m,b=-1;while((m=re.exec(rest)))b=m.index+m[0].length;
-    if(b>0&&(rest.slice(0,b).trim().length>=(q.length?60:12))){push(rest.slice(0,b));sent+=b}};
+    if(b>0&&(rest.slice(0,b).trim().length>=(q.length?260:12))){push(rest.slice(0,b));sent+=b}};
   (async()=>{await before;let i=0;
     for(;;){if(VX.gen!==g)return;
       if(i<q.length){const it=q[i];
@@ -3472,7 +3482,7 @@ function speakStream(before){stopSpeak(true);const g=++VX.gen,cloud=VX_ON();let 
 /* krátké „jasně, podívám se“ hned po domluvení – připravené dopředu, ať zazní okamžitě */
 const ACK={cs:['Jasně, podívám se na to.','Dobře, moment.','Hm, zamyslím se.','Rozumím, hned to bude.'],en:['Sure, let me take a look.','Okay, one moment.','Hmm, let me think.','Got it, just a sec.'],sk:['Jasné, pozriem sa na to.','Dobre, moment.','Hm, zamyslím sa.'],pl:['Jasne, już patrzę.','Dobra, chwilka.','Hm, niech pomyślę.'],de:['Klar, ich schau mal.','Okay, einen Moment.','Hm, lass mich überlegen.'],fr:['D’accord, je regarde.','Ok, un instant.','Hmm, je réfléchis.'],es:['Claro, lo miro.','Vale, un momento.','Mmm, déjame pensar.'],it:['Certo, do un’occhiata.','Ok, un attimo.','Mmm, fammi pensare.'],pt:['Claro, vou ver.','Ok, um momento.','Hmm, deixa-me pensar.'],uk:['Звісно, зараз подивлюся.','Добре, хвилинку.','Хм, дай подумати.'],hu:['Persze, megnézem.','Rendben, egy pillanat.','Hm, hadd gondolkodjak.'],nl:['Tuurlijk, ik kijk even.','Oké, momentje.','Hm, even denken.']};
 function vxAckPrep(){if(!VX_ON()||S.prefs.ack===false)return;const key=LANG()+'|'+vxVoice();if(VX.ackKey===key)return;VX.ackKey=key;VX.acks=[];
-  (ACK[LANG()]||ACK.en).forEach(t=>ttsUrl(t).then(u=>{VX.urls.delete(u);if(VX.ackKey===key)VX.acks.push(u)},()=>{}))}
+  (ACK[LANG()]||ACK.en).slice(0,2).forEach(t=>ttsUrl(t).then(u=>{VX.urls.delete(u);if(VX.ackKey===key)VX.acks.push(u)},()=>{}))}
 function vxAck(){if(S.prefs.ack===false||!VX.acks||!VX.acks.length)return Promise.resolve();let k=Math.floor(Math.random()*VX.acks.length);if(k===VX.ackLast&&VX.acks.length>1)k=(k+1)%VX.acks.length;VX.ackLast=k;
   return new Promise(res=>{const a=new Audio(VX.acks[k]);VX.ackAudio=a;a.playbackRate=clamp((S.prefs.voice||{}).rate||1,.7,1.4);const d=()=>{if(VX.ackAudio===a)VX.ackAudio=null;res()};a.onended=d;a.onerror=d;a.onpause=d;a.play().catch(d)})}
 let vxEvt=()=>{};
@@ -3553,9 +3563,16 @@ function VX_ONB(){const cur=vxVoice();return `<h1>${L('Hlas pomocníka','Your he
   <div class="opts">${CLOUD_VOICES.slice(0,6).map(([k,d])=>`<button type="button" class="opt" data-cvoice="${k}" aria-pressed="${cur===k}"><b>${k}</b><small>${esc(d)}</small></button>`).join('')}</div>
   <button type="button" class="toggle" data-onbtg="autoRead" aria-pressed="${S.prefs.autoRead}" style="margin-top:14px;width:100%"><span><b>Číst odpovědi nahlas</b><small>Můžeš kdykoli změnit v nastavení.</small></span><span class="knob"></span></button>`}
 document.addEventListener('click',e=>{const en=e.target.closest('[data-veng]');if(en){S.prefs.voice=Object.assign({},S.prefs.voice,{engine:en.dataset.veng});save();stopSpeak();settingsRedraw&&settingsRedraw();return}
-  if(e.target.closest('[data-cvtest]')){unlockAudio();speak(ENB()?VOICE_SAMPLE_EN:VOICE_SAMPLE_CS);return}
-  const cv=e.target.closest('[data-cvoice]');if(cv){S.prefs.voice=Object.assign({},S.prefs.voice,{cloud:cv.dataset.cvoice,engine:'cloud'});save();unlockAudio();speak(ENB()?VOICE_SAMPLE_EN:VOICE_SAMPLE_CS);if(typeof renderOnb==='function')renderOnb()}},true);
+  const tb=e.target.closest('[data-cvtest]');if(tb){unlockAudio();vxSample(tb);return}
+  const cv=e.target.closest('[data-cvoice]');if(cv){S.prefs.voice=Object.assign({},S.prefs.voice,{cloud:cv.dataset.cvoice,engine:'cloud'});save();unlockAudio();if(typeof renderOnb==='function')renderOnb();vxSample(document.querySelector('[data-cvoice="'+cv.dataset.cvoice+'"]')||cv)}},true);
 document.addEventListener('change',e=>{if(e.target&&e.target.id==='sCloudVoice'){S.prefs.voice=Object.assign({},S.prefs.voice,{cloud:e.target.value});save();speak(ENB()?VOICE_SAMPLE_EN:VOICE_SAMPLE_CS)}},true);
+
+/* ukázka hlasu: krátká věta, tlačítko ukazuje „načítám“, napodruhé hraje z paměti zařízení */
+const VX_SAMPLE=()=>L('Ahoj! Tímhle hlasem ti budu vysvětlovat.','Hi! This is the voice I will explain things with.');
+function vxSample(btn){if(btn){btn.classList.add('vx-loading');btn.setAttribute('aria-busy','true')}
+  const off=()=>{if(btn){btn.classList.remove('vx-loading');btn.removeAttribute('aria-busy')}};
+  VX.onPlay=off;speak(VX_SAMPLE(),off);setTimeout(off,20000)}
+(function(){try{const st=document.createElement('style');st.textContent='.vx-loading{position:relative;opacity:.75;pointer-events:none}.vx-loading::after{content:"";position:absolute;right:8px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:vxspin .7s linear infinite}@keyframes vxspin{to{transform:rotate(360deg)}}';document.head.appendChild(st)}catch(e){}})();
 
 /* ===== Účet a synchronizace: přihlášení kódem z e-mailu, sešity na všech zařízeních, sdílení se spolužáky ===== */
 const SYNCUI={step:'email',email:'',busy:false,err:''};
@@ -3721,7 +3738,15 @@ async function mobileExplain(url){if($('#modalRoot').children.length)closeModal(
   try{A.addListener('circle',d=>{if(d&&d.url)mobileExplain(d.url)})}catch(e){}
   const resume=async()=>{if(document.hidden)return;try{const r=await A.takePending();if(r&&r.url)mobileExplain(r.url)}catch(e){}
     if(ABUB.waitPerm){try{if((await A.canDraw()).value){ABUB.waitPerm=false;aStart()}}catch(e){}}aRefresh()};
-  document.addEventListener('visibilitychange',resume);setTimeout(resume,1500)})();
+  document.addEventListener('visibilitychange',resume);setTimeout(resume,1500);
+  // jednou nabídnout bublinu přes ostatní aplikace – jinak o ní člověk neví a myslí si, že kulička funguje jen v appce
+  setTimeout(async()=>{try{if(!S.profile||!S.profile.onboarded||S.prefs.aBubbleAsked||S.prefs.aBubble||ABUB.running)return;if($('#modalRoot').children.length)return;
+    S.prefs.aBubbleAsked=true;save();
+    const m=openModal(`<div class="modal-h"><h2>${L('Pomocník i mimo Loopnote','Your helper outside Loopnote')}</h2></div>
+      <div class="modal-b"><p style="margin:0 0 10px">${L('Kulička s pomocníkem může plavat nad všemi aplikacemi – nad Moodlem, PDF, webem i videem. Ťukneš na ni, zakroužkuješ, co nechápeš, a hned ti to vysvětlí.','The helper bubble can float over every app – Moodle, PDFs, the web, videos. Tap it, circle what you don’t get and it explains it right away.')}</p>
+      <p class="fine" style="margin:0">${L('Android se zeptá na dvě povolení: „Zobrazovat přes jiné aplikace“ a snímání obrazovky. Kdykoli to vypneš v Nastavení → Bublina přes ostatní aplikace.','Android will ask for two permissions: “Display over other apps” and screen capture. Turn it off anytime in Settings → Bubble over other apps.')}</p></div>
+      <div class="modal-f"><button type="button" class="btn" data-abno>${L('Teď ne','Not now')}</button><button type="button" class="btn primary" data-abyes>${L('Zapnout bublinu','Turn the bubble on')}</button></div>`);
+    m.addEventListener('click',e=>{if(e.target.closest('[data-abyes]')){closeModal();aStart()}else if(e.target.closest('[data-abno]')){closeModal();toast(L('Najdeš ji v Nastavení → Bublina přes ostatní aplikace.','You’ll find it in Settings → Bubble over other apps.'),4500)}})}catch(e){}},4000)})();
 
 /* počítač: kroužek nebo hlas na ploše -> odpověď v okénku na ploše; appka umí zapsat do sešitu, kalendáře i minutku */
 async function explainShot(url,question,history,onText){const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};
@@ -3794,7 +3819,7 @@ if(window.loopnoteDesktop){document.documentElement.classList.add('is-desktop');
   D.onSpeak&&D.onSpeak(r=>{if(r&&r.text){unlockAudio();speak(r.text)}else stopSpeak()});
   D.onOpenNb&&D.onOpenNb(r=>{const nb=S.notebooks.find(n=>n.id===r.nbId);if(!nb)return;if($('#modalRoot').children.length)closeModal();if(!S.profile.onboarded){S.profile.onboarded=true;save()}openNotebook(nb.id,r.pi||0)});
   D.onCaptureFailed(()=>toast(L('Nejde vyfotit obrazovku. Na Macu povol Loopnote v Nastavení → Soukromí → Nahrávání obrazovky.','Could not capture the screen. On a Mac allow Loopnote in Settings → Privacy → Screen Recording.'),6000))}
-function errCopy(code){const m=errCopy0(code),d=AI_DETAIL;AI_DETAIL='';return d&&!['cancelled','usage','refused','offline'].includes(code)?m+' ('+String(d).slice(0,160)+')':m}
+function errCopy(code){const m=errCopy0(code),d=AI_DETAIL;AI_DETAIL='';return d&&!['cancelled','usage','refused','offline','busy'].includes(code)?m+' ('+String(d).slice(0,160)+')':m}
 /* nová instalace: 3 sešity (1 s ukázkou, 2 prázdné), názvy podle jazyka, žádná vymyšlená zkouška ani kartičky */
 function SEED3_(){return {math:{en:'Mathematics',cs:'Matematika',sk:'Matematika',pl:'Matematyka',de:'Mathematik',fr:'Mathématiques',es:'Matemáticas',it:'Matematica',pt:'Matemática',uk:'Математика',hu:'Matematika',nl:'Wiskunde'},
   notes:{en:'Notes',cs:'Poznámky',sk:'Poznámky',pl:'Notatki',de:'Notizen',fr:'Notes',es:'Apuntes',it:'Appunti',pt:'Apontamentos',uk:'Нотатки',hu:'Jegyzetek',nl:'Aantekeningen'},
