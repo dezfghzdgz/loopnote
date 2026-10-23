@@ -524,7 +524,7 @@ div.qopt{cursor:default}.recall-tag{display:inline-block;font-size:11.5px;font-w
 @media (max-width:420px){.opts.c2{grid-template-columns:minmax(0,1fr)}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
-<style>.is-desktop #fab{display:none!important}.talkbtn[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}.talkbar{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2,inherit)}.talkbar .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);transform:scale(calc(1 + var(--lv,0)*.8));transition:transform .08s}.talkbar .dot.thinking,.talkbar .dot.heard{animation:tkp 1s infinite alternate}.talkbar .dot.error{background:#c0392b}.talkbar .linkbtn{margin-left:auto}@keyframes tkp{from{opacity:.3}to{opacity:1}}#onb .sso,#onb .or{display:none!important}.linkbtn{border:0;background:none;color:var(--accent);font:inherit;text-decoration:underline;cursor:pointer;padding:0}html,body{overscroll-behavior:none}</style>
+<style>.recbtn{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--raised);font-weight:700;font-size:13px;color:var(--fg);margin-right:6px}.recbtn[hidden]{display:none}.recbtn .rdot{width:10px;height:10px;border-radius:50%;background:#e03131}.recbtn.on{background:#e03131;border-color:#e03131;color:#fff}.recbtn.on .rdot{background:#fff;border-radius:2px;animation:tkp 1s infinite alternate}@media (max-width:640px){#recBtnT{display:none}.recbtn{padding:0 10px}}.is-desktop #fab{display:none!important}.talkbtn[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}.talkbar{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2,inherit)}.talkbar .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);transform:scale(calc(1 + var(--lv,0)*.8));transition:transform .08s}.talkbar .dot.thinking,.talkbar .dot.heard{animation:tkp 1s infinite alternate}.talkbar .dot.error{background:#c0392b}.talkbar .linkbtn{margin-left:auto}@keyframes tkp{from{opacity:.3}to{opacity:1}}#onb .sso,#onb .or{display:none!important}.linkbtn{border:0;background:none;color:var(--accent);font:inherit;text-decoration:underline;cursor:pointer;padding:0}html,body{overscroll-behavior:none}</style>
 </head>
 <body>
 
@@ -604,6 +604,7 @@ div.qopt{cursor:default}.recall-tag{display:inline-block;font-size:11.5px;font-w
   <div class="ed-top">
     <button class="back" type="button" id="edBack"><svg class="i" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Sešity</button>
     <input class="ed-title" id="edTitle" aria-label="Název sešitu" autocomplete="off">
+    <button class="recbtn" type="button" id="recBtn" hidden><span class="rdot"></span><span id="recBtnT">Nahrávat</span></button>
     <span class="saved" id="savedLbl">Uloženo</span>
     <button class="iconbtn" type="button" id="undoBtn" aria-label="Zpět"><svg class="i" viewBox="0 0 24 24"><path d="M9 6L4 11l5 5"/><path d="M4 11h10a6 6 0 010 12h-2"/></svg></button>
     <button class="iconbtn" type="button" id="redoBtn" aria-label="Znovu"><svg class="i" viewBox="0 0 24 24"><path d="M15 6l5 5-5 5"/><path d="M20 11H10a6 6 0 000 12h2"/></svg></button>
@@ -2026,7 +2027,7 @@ async function askNotes(q){if(NOTES.ctl)NOTES.ctl.abort();const en={q,text:'',do
   if(usageLeft()<=0){en.done=true;en.paywall=true;renderNotes();return}
   const t=NOTES.turns;const input=t.length?[{role:'user',content:notesPrompt(t[0].content)},...t.slice(1).slice(-6),{role:'user',content:q}]:notesPrompt(q);
   const ctl=new AbortController();NOTES.ctl=ctl;
-  try{const res=await sample(input,{modelTier:S.profile.ai,signal:ctl.signal,cache:false,onText:({text})=>{en.text=text;if(!notesRaf)notesRaf=requestAnimationFrame(()=>{notesRaf=0;renderNotes()})}});
+  try{const res=await sample(input,{modelTier:S.profile.ai,signal:ctl.signal,cache:false,onText:({text})=>{en.text=text;if(NOTES.tap)try{NOTES.tap(cleanAns(text,true))}catch(e){}if(!notesRaf)notesRaf=requestAnimationFrame(()=>{notesRaf=0;renderNotes()})}});
     en.text=stripAg(res.text);NOTES.turns.push({role:'user',content:q},{role:'assistant',content:res.text});spendUsage();agHandle(res.text,q);if(S.prefs.autoRead&&!TALK.on)speak(en.text)}
   catch(e){if(!(e&&e.code==='cancelled'))en.err=errCopy(e&&e.code);en.text=e&&e.code!=='refused'&&e.text||en.text}
   finally{en.done=true;if(NOTES.ctl===ctl)NOTES.ctl=null;renderNotes()}}
@@ -3443,9 +3444,37 @@ function speak(t,onEnd0){stopSpeak();let fired=false;const onEnd=()=>{if(fired)r
       if(i+1<parts.length){next=ttsUrl(parts[i+1],ctl.signal);next.catch(()=>{})}
       await vxPlay(url,g);if(VX.gen!==g){next.then(vxFree,()=>{});return}}
     if(VX.gen===g){speaking=null;syncSpeak();vxEvt({type:'speaking',on:false});onEnd()}})()}
-function stopSpeak(){const pend=VX.onEnd;VX.onEnd=null;VX.gen++;if(VX.ctl){try{VX.ctl.abort()}catch(e){}VX.ctl=null}if(VX.audio){try{VX.audio.pause()}catch(e){}VX.audio=null}if(VX.playRes)VX.playRes();for(const u of [...VX.urls])vxFree(u);stopSpeakDevice();vxEvt({type:'speaking',on:false});if(pend)pend()}
+function stopSpeak(keepAck){const pend=VX.onEnd;VX.onEnd=null;VX.gen++;if(!keepAck&&VX.ackAudio){try{VX.ackAudio.pause()}catch(e){}VX.ackAudio=null}if(VX.ctl){try{VX.ctl.abort()}catch(e){}VX.ctl=null}if(VX.audio){try{VX.audio.pause()}catch(e){}VX.audio=null}if(VX.playRes)VX.playRes();for(const u of [...VX.urls])vxFree(u);stopSpeakDevice();vxEvt({type:'speaking',on:false});if(pend)pend()}
 function vxWaitDevice(cb){const g=VX.gen;let n=0;const t=setInterval(()=>{n++;const busy=window.speechSynthesis&&(speechSynthesis.speaking||speechSynthesis.pending);if((!busy&&n>3)||VX.gen!==g||n>1200){clearInterval(t);if(VX.gen===g)cb()}},250)}
 function speakAwait(t){return new Promise(res=>speak(t,res))}
+/* mluvení po větách: hlas začne první větou, zatímco se zbytek odpovědi ještě píše */
+function speakStream(before){stopSpeak(true);const g=++VX.gen,cloud=VX_ON();let fired=false,resolve;const done=new Promise(r=>resolve=r);
+  const onEnd=()=>{if(fired)return;fired=true;if(VX.onEnd===onEnd)VX.onEnd=null;if(speaking){speaking=null;syncSpeak()}vxEvt({type:'speaking',on:false});resolve()};VX.onEnd=onEnd;
+  const ctl=new AbortController();VX.ctl=ctl;const q=[];let sent=0,ended=false,full='',wake=null;
+  const push=seg=>{const t=speakable(seg);if(!t)return;if(cloud){const p=ttsUrl(t,ctl.signal);p.catch(()=>{});q.push({p,t})}else q.push({t});if(wake)wake()};
+  const cut=(text,final)=>{full=text;if(final){push(text.slice(sent));sent=text.length;return}
+    // hotová věta (nebo řádek); první kousek klidně krátký, ať hlas začne co nejdřív
+    const rest=text.slice(sent),re=/[.!?…](\s|$)|\n/g;let m,b=-1;while((m=re.exec(rest)))b=m.index+m[0].length;
+    if(b>0&&(rest.slice(0,b).trim().length>=(q.length?60:12))){push(rest.slice(0,b));sent+=b}};
+  (async()=>{await before;let i=0;
+    for(;;){if(VX.gen!==g)return;
+      if(i<q.length){const it=q[i];
+        if(!cloud||!it.p){speaking={dev:g};syncSpeak();vxEvt({type:'speaking',on:true});speakDevice(q.slice(i).map(x=>x.t).join(' ')+(ended?'':''));i=q.length;
+          await new Promise(r=>vxWaitDevice(r));if(VX.gen!==g)return;if(ended&&i>=q.length)break;continue}
+        let url;try{url=await it.p}catch(e){if(VX.gen!==g)return;if(e&&e.code==='cancelled')return;
+          // přirozený hlas selhal – zbytek přečte hlas zařízení
+          const restT=q.slice(i).map(x=>x.t).join(' ')+' '+speakable(full.slice(sent));q.length=i;i=0;speakDevice(restT);await new Promise(r=>vxWaitDevice(r));break}
+        if(VX.gen!==g){vxFree(url);return}if(!speaking){speaking={cloud:g};syncSpeak();vxEvt({type:'speaking',on:true})}
+        await vxPlay(url,g);i++;continue}
+      if(ended)break;await new Promise(r=>{wake=r});wake=null}
+    if(VX.gen===g)onEnd()})();
+  return {feed:t=>{if(!ended)cut(String(t||''),false)},end:t=>{if(ended)return;cut(String(t==null?full:t),true);ended=true;if(wake)wake()},done}}
+/* krátké „jasně, podívám se“ hned po domluvení – připravené dopředu, ať zazní okamžitě */
+const ACK={cs:['Jasně, podívám se na to.','Dobře, moment.','Hm, zamyslím se.','Rozumím, hned to bude.'],en:['Sure, let me take a look.','Okay, one moment.','Hmm, let me think.','Got it, just a sec.'],sk:['Jasné, pozriem sa na to.','Dobre, moment.','Hm, zamyslím sa.'],pl:['Jasne, już patrzę.','Dobra, chwilka.','Hm, niech pomyślę.'],de:['Klar, ich schau mal.','Okay, einen Moment.','Hm, lass mich überlegen.'],fr:['D’accord, je regarde.','Ok, un instant.','Hmm, je réfléchis.'],es:['Claro, lo miro.','Vale, un momento.','Mmm, déjame pensar.'],it:['Certo, do un’occhiata.','Ok, un attimo.','Mmm, fammi pensare.'],pt:['Claro, vou ver.','Ok, um momento.','Hmm, deixa-me pensar.'],uk:['Звісно, зараз подивлюся.','Добре, хвилинку.','Хм, дай подумати.'],hu:['Persze, megnézem.','Rendben, egy pillanat.','Hm, hadd gondolkodjak.'],nl:['Tuurlijk, ik kijk even.','Oké, momentje.','Hm, even denken.']};
+function vxAckPrep(){if(!VX_ON()||S.prefs.ack===false)return;const key=LANG()+'|'+vxVoice();if(VX.ackKey===key)return;VX.ackKey=key;VX.acks=[];
+  (ACK[LANG()]||ACK.en).forEach(t=>ttsUrl(t).then(u=>{VX.urls.delete(u);if(VX.ackKey===key)VX.acks.push(u)},()=>{}))}
+function vxAck(){if(S.prefs.ack===false||!VX.acks||!VX.acks.length)return Promise.resolve();let k=Math.floor(Math.random()*VX.acks.length);if(k===VX.ackLast&&VX.acks.length>1)k=(k+1)%VX.acks.length;VX.ackLast=k;
+  return new Promise(res=>{const a=new Audio(VX.acks[k]);VX.ackAudio=a;a.playbackRate=clamp((S.prefs.voice||{}).rate||1,.7,1.4);const d=()=>{if(VX.ackAudio===a)VX.ackAudio=null;res()};a.onended=d;a.onerror=d;a.onpause=d;a.play().catch(d)})}
 let vxEvt=()=>{};
 
 /* poslech: mikrofon → kousek řeči (konec po chvíli ticha) → WAV 16 kHz */
@@ -3474,13 +3503,16 @@ const TALK={on:false,state:'',sid:0};
 async function talkLoop(ask,ui){if(!HAS_API){const m=L('Mluvení zatím nejde – appka není připojená k serveru (config.js).','Talking is not available – the app is not connected to the server (config.js).');toast(m,4000);ui&&ui('error',m);return}
   const sid=++TALK.sid;TALK.on=true;TALK.ui=ui;let misses=0;const live=()=>TALK.on&&TALK.sid===sid;
   const set=(st,x)=>{TALK.state=st;ui&&ui(st,x)};
+  vxAckPrep();
   while(live()){set('listening');const r=await vxListen({level:lv=>ui&&ui('level',lv)});if(!live())break;
     if(r.err){set('error',L('Nemám přístup k mikrofonu. Povol ho v nastavení systému.','No microphone access. Allow it in your system settings.'));break}
     if(r.none){if(++misses>=2)break;continue}
-    set('thinking');let q='';try{q=await vxTranscribe(r.wav)}catch(e){if(!live())break;set('error',errCopy(e&&e.code));break}
+    // hned potvrdit („jasně, podívám se“), přepis a přemýšlení běží mezitím
+    set('thinking');const ackP=vxAck();let q='';try{q=await vxTranscribe(r.wav)}catch(e){if(!live())break;set('error',errCopy(e&&e.code));break}
     if(!live())break;if(!q){if(++misses>=2)break;continue}misses=0;set('heard',q);
-    let text='';try{text=await ask(q)}catch(e){if(!live())break;set('error',errCopy(e&&e.code));break}
-    if(!live())break;if(!text)continue;set('speaking',text);await speakAwait(text)}
+    const ss=speakStream(ackP);let text='';
+    try{text=await ask(q,t=>ss.feed(t))}catch(e){ss.end('');stopSpeak();if(!live())break;set('error',errCopy(e&&e.code));break}
+    if(!live()){ss.end('');break}if(!text){ss.end('');stopSpeak();continue}ss.end(text);set('speaking',text);await ss.done}
   if(TALK.sid===sid){TALK.on=false;vxMicOff();set('off')}}
 function talkStop(){const u=TALK.ui,was=TALK.on;TALK.on=false;TALK.ui=null;TALK.sid++;if(VX.cancel)VX.cancel();stopSpeak();vxMicOff();TALK.state='';if(was&&u)u('off')}
 
@@ -3495,7 +3527,7 @@ function talkStop(){const u=TALK.ui,was=TALK.on;TALK.on=false;TALK.ui=null;TALK.
     bar.innerHTML=`<span class="dot ${st}"></span><span>${esc(T[st]||'')}</span><button type="button" class="linkbtn" data-talkstop>${L('Ukončit','End')}</button>`;if(st==='error')setTimeout(()=>{if(!TALK.on)bar.hidden=true},5000)};
   bar.addEventListener('click',e=>{if(e.target.closest('[data-talkstop]'))talkStop()});
   mic.addEventListener('click',()=>{if(TALK.on&&TALK.state==='speaking'){stopSpeak();return}if(TALK.on){talkStop();return}unlockAudio();
-    talkLoop(async q=>{await askNotes(q);const en=NOTES.thread[NOTES.thread.length-1];return en&&en.text&&!en.err?cleanAns(en.text,false):''},ui)});
+    talkLoop(async(q,part)=>{NOTES.tap=part;try{await askNotes(q)}finally{NOTES.tap=null}const en=NOTES.thread[NOTES.thread.length-1];return en&&en.text&&!en.err?cleanAns(en.text,false):''},ui)});
   const cl=$('#notesClose');if(cl)cl.addEventListener('click',()=>{if(TALK.on)talkStop()})})();
 
 /* nastavení hlasu: přirozený (Gemini) nebo hlas zařízení */
@@ -3512,8 +3544,10 @@ function deskTalkHTML(){if(!window.loopnoteDesktop)return '';const m=S.prefs.des
     <div class="opts c2"><button type="button" class="opt" data-dtalk="screen" aria-pressed="${m==='screen'}"><b>${L('Jen hlas + kreslení','Voice + drawing')}</b><small>${L('Žádné okénko. Pomocník vidí obrazovku, mluví a ukazuje přímo na ni – kroužek, šipka, poznámka.','No window. The helper sees your screen, talks and points right on it – circles, arrows, notes.')}</small></button>
     <button type="button" class="opt" data-dtalk="panel" aria-pressed="${m!=='screen'}"><b>${L('S okénkem','With a panel')}</b><small>${L('Odpovědi i jako text v malém okénku vedle bubliny.','Answers also as text in a small panel by the bubble.')}</small></button></div>
     <button type="button" class="toggle" data-dsubs aria-pressed="${sub}"><span><b>${L('Titulky','Subtitles')}</b><small>${L('Při mluvení bez okénka ukazovat dole na obrazovce, co pomocník říká.','Show what the helper says at the bottom of the screen.')}</small></span><span class="knob"></span></button>
+    <div class="row"><button type="button" class="btn" data-dtest>✏️ ${L('Vyzkoušet kreslení na obrazovku','Test drawing on screen')}</button><button type="button" class="toggle" data-dack aria-pressed="${S.prefs.ack!==false}" style="flex:1"><span><b>${L('Hned potvrdit („jasně, podívám se“)','Acknowledge right away (“sure, let me look”)')}</b></span><span class="knob"></span></button></div>
     <p class="fine" style="margin:0">${L('Mluvit začneš podržením bubliny, pravým klikem nebo Ctrl+Shift+Mezerník. Ukončíš klikem na bublinu nebo Esc.','Start talking by holding the bubble, right-clicking it or Ctrl+Shift+Space. Stop with a click on the bubble or Esc.')}</p></div>`}
-document.addEventListener('click',e=>{const b=e.target.closest('[data-dtalk],[data-dsubs]');if(!b)return;if(b.dataset.dtalk)S.prefs.deskTalk=b.dataset.dtalk;else S.prefs.deskSubs=!(S.prefs.deskSubs!==false);save();
+document.addEventListener('click',e=>{if(e.target.closest('[data-dtest]')&&window.loopnoteDesktop){window.loopnoteDesktop.drawTest({text:L('Takhle ti budu ukazovat přímo na obrazovce.','This is how I will point things out on your screen.'),items:[{type:'circle',box:[380,330,560,560],color:'red'},{type:'arrow',box:[380,330,560,560],color:'blue'},{type:'underline',box:[620,300,660,700],color:'green'},{type:'check',box:[620,700,660,720],color:'green'},{type:'text',box:[300,600,330,700],text:L('tady!','here!'),color:'red'}]});return}
+  const b=e.target.closest('[data-dtalk],[data-dsubs],[data-dack]');if(!b)return;if(b.dataset.dtalk)S.prefs.deskTalk=b.dataset.dtalk;else if('dack' in b.dataset){S.prefs.ack=S.prefs.ack===false;VX.ackKey=null}else S.prefs.deskSubs=!(S.prefs.deskSubs!==false);save();
   window.__deskHello&&window.__deskHello();const g=document.getElementById('deskTalkG');if(g)g.outerHTML=deskTalkHTML()},true);
 function VX_ONB(){const cur=vxVoice();return `<h1>${L('Hlas pomocníka','Your helper\'s voice')}</h1><p class="lead">${L('Vyber si, jak na tebe bude pomocník mluvit. Ťukni na hlas a hned ho uslyšíš.','Pick how your helper sounds. Tap a voice to hear it.')}</p>
   <div class="opts">${CLOUD_VOICES.slice(0,6).map(([k,d])=>`<button type="button" class="opt" data-cvoice="${k}" aria-pressed="${cur===k}"><b>${k}</b><small>${esc(d)}</small></button>`).join('')}</div>
@@ -3649,6 +3683,11 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-lec]');if(
   if(k==='rec'){lecOn()?lecStop():lecStart()}else if(k==='notes')lecNotes();else if(k==='cancel'&&LREC.ctl){LREC.ctl.stop=true;b.disabled=true}},true);
 window.addEventListener('pagehide',()=>{const c=LREC.cur;if(c&&c.on)lecPersist(c)});
 
+/* tlačítko ● Nahrávat v liště sešitu (1 klik) */
+function lecBtnSync(){const b=document.getElementById('recBtn');if(!b)return;if(!(navigator.mediaDevices&&window.MediaRecorder)){b.hidden=true;return}b.hidden=false;const on=lecOn();b.classList.toggle('on',on);
+  document.getElementById('recBtnT').textContent=on?fmtT((Date.now()-LREC.cur.t0)/1000):L('Nahrávat přednášku','Record lecture');b.title=on?L('Zastavit nahrávání','Stop recording'):L('Nahrávat přednášku – poznámky se spojí s nahrávkou a pak z ní uděláš zápis','Record the lecture – notes link to the recording, then turn it into notes')}
+(function(){const b=document.getElementById('recBtn');if(!b)return;b.addEventListener('click',()=>{if(!ED)return;if(lecOn())lecStop();else{openRecBar();lecStart()}setTimeout(lecBtnSync,300)});setInterval(lecBtnSync,1000);lecBtnSync()})();
+
 /* ===== Android: bublina přes ostatní aplikace (nativní plugin LoopnoteOverlay) ===== */
 function AOV(){try{return window.Capacitor&&Capacitor.getPlatform&&Capacitor.getPlatform()==='android'&&Capacitor.Plugins&&Capacitor.Plugins.LoopnoteOverlay||null}catch(e){return null}}
 const ABUB={running:false,waitPerm:false};
@@ -3697,21 +3736,28 @@ ${AG_RULE(!!url)}`;
   if(usageLeft()<=0)throw {code:'usage'};
   const r=await sample(input,{images:imgs,modelTier:S.profile.ai||'default',onText:onText?({text})=>onText(cleanAns(text,true)):undefined});spendUsage();return String(r.text||'').trim()}
 /* mluvení bez okénka: pomocník vidí obrazovku, mluví a ukazuje na ni */
-async function screenAnswer(q,history,onText){const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};if(usageLeft()<=0)throw {code:'usage'};
+async function screenAnswer(q,history,onRaw){const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};if(usageLeft()<=0)throw {code:'usage'};
   let sh=null;try{sh=await window.loopnoteDesktop.screenShot()}catch(e){}const imgs=sh?[(await fetch(sh.url)).blob()]:[];
   const sys=`${TEACHER()}
 ${profileCtx(null)}
 JAK MLUVIT: ${styleGuide()}
 Student s tebou mluví hlasem přes Loopnote na počítači. ${sh?'Na obrázku je, co má právě teď na obrazovce (web, video, PDF, úloha…).':''} Odpovídej krátce a přirozeně, jako když sedíš vedle něj: nejvýš 4–5 vět, bez nadpisů a seznamů. ${VOICE_RULE}
-UKAZOVÁNÍ NA OBRAZOVCE: ${sh?`Když pomůže něco ukázat, nakresli to studentovi přímo na obrazovku – na úplný konec odpovědi přidej jeden řádek
+UKAZOVÁNÍ NA OBRAZOVCE: ${sh?`Umíš studentovi kreslit přímo na obrazovku a máš to dělat: kdykoli mluvíš o něčem, co je vidět na obrázku (vzorec, slovo, krok, chyba, tlačítko, část grafu…), ukaž to. Napiš to jako ÚPLNĚ PRVNÍ řádek odpovědi (ještě před tím, co řekneš), přesně ve tvaru
 [[KRESLI {"items":[{"type":"circle","box":[ymin,xmin,ymax,xmax],"color":"red"}]}]]
-type: circle (zakroužkovat), underline (podtrhnout), arrow (šipka k místu), box (orámovat), check (fajfka – správně), cross (křížek – chyba), text (krátká poznámka rukou vedle místa, pole "text", max 30 znaků). box = místo na obrázku v souřadnicích 0–1000 (ymin, xmin, ymax, xmax), co nejpřesněji. color: red, green, blue nebo yellow. Nejvýš 4 položky. V řeči na ně přirozeně odkaž („tady, co jsem zakroužkoval…“). Když není co ukazovat, řádek vynech.`:'Teď obrazovku nevidíš, nic nekresli.'}
+type: circle (zakroužkovat), underline (podtrhnout), arrow (šipka k místu), box (orámovat), check (fajfka – správně), cross (křížek – chyba), text (krátká poznámka rukou vedle místa, pole "text", max 30 znaků). box = přesné místo na obrázku v souřadnicích 0–1000 (ymin, xmin, ymax, xmax) – stejně jako když hledáš objekty na obrázku. color: red, green, blue nebo yellow. 1–4 položky. Pak teprve mluv a na nakreslené přirozeně odkaž („tady, co jsem zakroužkoval…“). Když na obrazovce opravdu není co ukázat (obecná otázka), řádek vynech.`:'Teď obrazovku nevidíš, nic nekresli.'}
 ${AG_RULE(false)}`;
   const input=history&&history.length?[{role:'user',content:sys},...history.slice(-8),{role:'user',content:q}]:sys+'\n\nSTUDENT ŘÍKÁ: '+q;
-  const r=await sample(input,{images:imgs,modelTier:S.profile.ai||'default',onText:onText?({text})=>onText(cleanAns(text,true)):undefined});spendUsage();return String(r.text||'').trim()}
-function drawItems(raw){const i=String(raw).indexOf('[[KRESLI');if(i<0)return [];const rest=raw.slice(i+8),j=rest.lastIndexOf(']]');if(j<0)return [];
-  try{const o=JSON.parse(rest.slice(0,j).trim());const T=['circle','underline','arrow','box','check','cross','text'];
-    return (o.items||[]).filter(x=>x&&T.includes(x.type)&&Array.isArray(x.box)&&x.box.length===4).slice(0,6).map(x=>({type:x.type,box:x.box.map(n=>Math.max(0,Math.min(1000,+n||0))),color:x.color,text:String(x.text||'').slice(0,40)}))}catch(e){return []}}
+  const r=await sample(input,{images:imgs,modelTier:S.profile.ai||'default',onText:onRaw?({text})=>onRaw(text):undefined});spendUsage();return String(r.text||'').trim()}
+/* čtení kreslicího příkazu: tolerantní k tomu, jak ho AI napíše (box / box_2d, s ```json, s textem kolem) */
+function drawItems(raw){raw=String(raw||'');const i=raw.search(/\[\[\s*KRESLI/i);if(i<0)return [];const st=raw.indexOf('{',i);if(st<0)return [];
+  let d=0,inS=false,esc2=false,end=-1;for(let k=st;k<raw.length;k++){const c=raw[k];if(inS){if(esc2)esc2=false;else if(c==='\\')esc2=true;else if(c==='"')inS=false;continue}
+    if(c==='"')inS=true;else if(c==='{')d++;else if(c==='}'){d--;if(!d){end=k;break}}}if(end<0)return [];
+  let o;try{o=JSON.parse(raw.slice(st,end+1))}catch(e){return []}const arr=Array.isArray(o)?o:(o.items||o.shapes||o.draw||[]);const T=['circle','underline','arrow','box','check','cross','text'];
+  const AL={kruh:'circle',ellipse:'circle',oval:'circle',podtrhnout:'underline',line:'underline',sipka:'arrow',rect:'box',rectangle:'box',ramecek:'box',tick:'check',ok:'check',x:'cross',wrong:'cross',note:'text',label:'text'};
+  return arr.map(x=>{if(!x)return null;let t=String(x.type||'').toLowerCase();t=T.includes(t)?t:AL[norm(t)]||null;let b=x.box||x.box_2d||x.bbox;
+      if(b&&!Array.isArray(b)&&typeof b==='object')b=[b.ymin,b.xmin,b.ymax,b.xmax];if(!t||!Array.isArray(b)||b.length!==4)return null;b=b.map(n=>+n||0);
+      if(b.every(n=>n<=1.001))b=b.map(n=>n*1000); // někdy píše 0–1
+      return {type:t,box:b.map(n=>Math.max(0,Math.min(1000,n))),color:x.color,text:String(x.text||x.label||'').slice(0,40)}}).filter(Boolean).slice(0,6)}
 function deskImg(url){return new Promise(r=>{if(!url){r(null);return}const im=new Image();im.onload=()=>r({url,w:im.naturalWidth,h:im.naturalHeight});im.onerror=()=>r(null);im.src=url})}
 async function deskAnswer(url,q,history,onText){const img=await deskImg(url);const raw=await explainShot(url,q,history,onText);
   const nT=TMRAW().filter(t=>!t.del).length;const cal=agHandle(raw,q,img)||[];const zap=LAST_ZAPIS.slice();const hadTimer=TMRAW().filter(t=>!t.del).length>nT;
@@ -3733,11 +3779,17 @@ if(window.loopnoteDesktop){document.documentElement.classList.add('is-desktop');
     catch(e){D.explainResult({id:req.id,err:errCopy(e&&e.code),lang:LOC(),ui:LANG()})}});
   D.onTalk&&D.onTalk(req=>{talkStop();if(!req.on)return;
     if(req.mode==='screen'){const hist=[],sid=req.sid;D.drawClear(false);
-      talkLoop(async q=>{let lp=0;const raw=await screenAnswer(q,hist,t=>{const n=Date.now();if(n-lp>120){lp=n;D.talkEvent({sid,type:'partial',text:t})}});
-          const items=drawItems(raw);const nT=TMRAW().filter(t=>!t.del).length;agHandle(raw,q,null);const text=cleanAns(raw,false);
-          hist.push({role:'user',content:q},{role:'assistant',content:text});D.draw({items});D.talkEvent({sid,type:'answer',q,text});return text},
+      talkLoop(async(q,part)=>{let lp=0,drawn=false;
+          const raw=await screenAnswer(q,hist,rw=>{
+            // kresba hned, jak AI dopíše kreslicí řádek (je na začátku odpovědi) – kreslí se, zatímco mluví
+            if(!drawn){const it=drawItems(rw);if(it.length){drawn=true;D.draw({items:it})}}
+            const t=cleanAns(rw,true);part&&part(t);const n=Date.now();if(n-lp>120){lp=n;D.talkEvent({sid,type:'partial',text:t})}});
+          if(!drawn){const it=drawItems(raw);if(it.length)D.draw({items:it})}
+          if(!/\[\[\s*KRESLI/i.test(raw))console.info('[Loopnote] AI tentokrát nic nekreslila');
+          agHandle(raw,q,null);const text=cleanAns(raw,false);
+          hist.push({role:'user',content:q},{role:'assistant',content:text});D.talkEvent({sid,type:'answer',q,text});return text},
         (st,x)=>{if(st==='level')return;if(st==='listening')D.drawClear(true);D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x})});return}const hist=(req.history||[]).slice();const sid=req.sid;
-    talkLoop(async q=>{let lp=0;const r=await deskAnswer(req.url,q,hist,t=>{const n=Date.now();if(n-lp>90){lp=n;D.talkEvent({sid,type:'partial',text:t})}});hist.push({role:'user',content:q},{role:'assistant',content:r.text});D.talkEvent({sid,type:'answer',q,text:r.text,acts:r.acts});return r.text},
+    talkLoop(async(q,part)=>{let lp=0;const r=await deskAnswer(req.url,q,hist,t=>{part&&part(t);const n=Date.now();if(n-lp>90){lp=n;D.talkEvent({sid,type:'partial',text:t})}});hist.push({role:'user',content:q},{role:'assistant',content:r.text});D.talkEvent({sid,type:'answer',q,text:r.text,acts:r.acts});return r.text},
       (st,x)=>{if(st!=='level')D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x});else D.talkEvent({sid,type:'level',x})})});
   D.onSpeak&&D.onSpeak(r=>{if(r&&r.text){unlockAudio();speak(r.text)}else stopSpeak()});
   D.onOpenNb&&D.onOpenNb(r=>{const nb=S.notebooks.find(n=>n.id===r.nbId);if(!nb)return;if($('#modalRoot').children.length)closeModal();if(!S.profile.onboarded){S.profile.onboarded=true;save()}openNotebook(nb.id,r.pi||0)});

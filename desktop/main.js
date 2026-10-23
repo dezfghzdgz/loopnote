@@ -300,6 +300,13 @@ ipcMain.on("draw", (_e, d) => {
   clearTimeout(annotClearT);
   if (d && d.items && d.items.length) toAnnot({ items: d.items }); else toAnnot({ clear: "slow" });
 });
+// zkouška kreslení z nastavení (bez AI) – ukáže, že vrstva na obrazovce funguje
+ipcMain.on("draw-test", (_e, d) => {
+  if (!screenTalk.on) { const bb = bubble && bubble.isVisible() ? bubble.getBounds() : null; capDisplay = bb ? screen.getDisplayMatching(bb) : screen.getDisplayNearestPoint(screen.getCursorScreenPoint()); }
+  if (win && win.isVisible() && !screenTalk.on) win.minimize(); // ať je kresba vidět na ploše
+  clearTimeout(annotClearT);
+  setTimeout(() => { toAnnot({ items: (d && d.items) || [], st: "speaking", text: (d && d.text) || "" }); annotClearT = setTimeout(() => { toAnnot({ st: "off", clear: "slow" }); hideAnnotSoon(); }, 6000); }, 350);
+});
 ipcMain.on("draw-clear", (_e, slow) => { clearTimeout(annotClearT); annotClearT = setTimeout(() => { if (annot) toAnnot({ clear: "slow" }); }, slow ? 7000 : 0); });
 ipcMain.on("overlay-talk", () => { if (overlay) overlay.close(); setTimeout(startTalk, 80); });
 ipcMain.on("bubble-talk", () => startTalk());
