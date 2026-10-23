@@ -398,6 +398,12 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .pop-zoom b{min-width:50px;text-align:center;color:var(--fg);font-variant-numeric:tabular-nums}
 .pop-zoom button{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);font-size:18px;font-weight:700}
 .pop-style{padding:12px;gap:12px;min-width:260px}
+.penset{padding:0 6px;gap:3px}.penset small{font-size:10px}
+#ruler{position:fixed;left:0;top:0;width:680px;height:64px;transform-origin:center;z-index:6;background:rgba(255,248,214,.86);border:1px solid #c9b77a;border-radius:6px;box-shadow:0 6px 18px -8px rgba(0,0,0,.45);touch-action:none;cursor:grab}
+#ruler[hidden]{display:none}#ruler canvas{width:680px;height:64px;display:block}#ruler .ang{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:700 13px system-ui;color:#5b4b14}
+#ruler button{position:absolute;top:50%;transform:translateY(-50%);width:26px;height:26px;border-radius:50%;border:1px solid #c9b77a;background:#fff;font-size:13px;line-height:1}#ruler .rrot{right:6px;cursor:grab}#ruler .rclose{left:6px}
+.lyrow{display:flex;align-items:center;gap:2px;border-radius:8px;padding:2px}.lyrow.on{background:var(--accent-soft)}.lyrow button{border:0;background:none;padding:4px 6px;border-radius:6px;font-size:13px}.lyrow .lyname{flex:1;text-align:left;font-weight:700}.lyrow button:disabled{opacity:.3}
+.brushes{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}.brushbtn{display:flex;flex-direction:column;align-items:flex-start;gap:2px;border:1px solid var(--line);border-radius:10px;padding:4px 8px 6px;background:var(--surface);font-size:12px;font-weight:700;color:var(--muted)}.brushbtn canvas{width:120px;height:36px}.brushbtn[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--fg)}
 .pop-sec{display:flex;flex-direction:column;gap:8px}
 .pop-sec .row{gap:6px}
 .sw.mini{width:18px;height:18px;margin:0;box-shadow:0 0 0 1px var(--line)}
@@ -708,9 +714,14 @@ const AIS={
   default:{n:'Vyvážený',d:'Doporučeno. Rychlý a přesný na většinu látky.'},
   complex:{n:'Nejchytřejší',d:'Přemýšlí déle. Na těžkou VŠ látku a důkazy.'}
 };
-const PEN_W=[1.6,2.6,4.4], HL_W=[12,18,26], HL_COLORS=['#ffd43b','#8ce99a','#ffa8c5','#74c0fc'];
+const PEN_W=[.9,1.6,2.6,4.4,7,11], HL_W=[12,18,26], HL_COLORS=['#ffd43b','#8ce99a','#ffa8c5','#74c0fc'];
 const DEFAULT_PALETTE=['auto','#1f4fbf','#c4372b','#2f9e5b','#e08a1e','#7b3fbf'];
 const ICON={
+  shape:'<rect x="3.5" y="11" width="8" height="8" rx="1"/><circle cx="16" cy="8" r="4.5"/>',
+  fill:'<path d="M5 11l7-7 7 7-7 7z"/><path d="M19 15c0 1.7 1 3 2 3"/><path d="M3 21h11"/>',
+  picker:'<path d="M14 4l6 6-2 2-6-6z"/><path d="M13 7l-8 8v4h4l8-8"/>',
+  ruler:'<rect x="2.5" y="8" width="19" height="8" rx="1.5"/><path d="M6 8v3M9 8v2M12 8v3M15 8v2M18 8v3"/>',
+  layers:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   pen:'<path d="M4 20l4-1L19 8a2.1 2.1 0 00-3-3L5 16z"/><path d="M14 7l3 3"/>',
   hl:'<path d="M9 14l-3 3v3h3l3-3"/><path d="M9 14l6-9 4 3-6 9z"/><path d="M14 20h6"/>',
   eraser:'<path d="M8 20h12"/><path d="M5.5 15.5l9-9a2 2 0 012.8 0l1.2 1.2a2 2 0 010 2.8L11 18H8z"/>',
@@ -736,13 +747,18 @@ function accSave(){try{if(ACC.s)localStorage.setItem('krouzek-auth',JSON.stringi
 function accFromHash(){const h=new URLSearchParams(location.hash.slice(1));const at=h.get('access_token');if(!at)return false;
   let email='';try{email=JSON.parse(atob(at.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).email||''}catch(e){}
   ACC.s={at,rt:h.get('refresh_token'),exp:Date.now()+(+h.get('expires_in')||3600)*1000,email};accSave();history.replaceState(null,'',location.pathname+location.search);return true}
-async function accToken(){if(!HAS_API||!ACC.s)return null;if(Date.now()>ACC.s.exp-60e3){try{const r=await fetch(KCFG.supabaseUrl+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:KCFG.anonKey,'content-type':'application/json'},body:JSON.stringify({refresh_token:ACC.s.rt})});
-  if(!r.ok)throw 0;const d=await r.json();ACC.s={at:d.access_token,rt:d.refresh_token,exp:Date.now()+d.expires_in*1000,email:(d.user&&d.user.email)||ACC.s.email};accSave()}catch(e){ACC.s=null;accSave();return null}}return ACC.s.at}
+/* obnovení přihlášení: odhlásí jen při neplatném tokenu, ne když zrovna nejde internet; najednou běží jen jedno */
+let ACC_REF=null;
+async function accToken(){if(!HAS_API||!ACC.s)return null;if(Date.now()<=ACC.s.exp-60e3)return ACC.s.at;
+  if(!ACC_REF)ACC_REF=(async()=>{const s0=ACC.s;let r;try{r=await fetch(KCFG.supabaseUrl+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:KCFG.anonKey,'content-type':'application/json'},body:JSON.stringify({refresh_token:s0.rt})})}catch(e){return null}
+    if(r.status===400||r.status===401||r.status===403){if(ACC.s===s0){ACC.s=null;accSave()}return null}if(!r.ok)return null;
+    const d=await r.json().catch(()=>null);if(!d||!d.access_token)return null;ACC.s={at:d.access_token,rt:d.refresh_token,exp:Date.now()+d.expires_in*1000,email:(d.user&&d.user.email)||s0.email};accSave();return ACC.s.at})().finally(()=>{ACC_REF=null});
+  return ACC_REF}
 const IS_NATIVE=!!window.loopnoteDesktop||!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
 const SITE=String(KCFG.siteUrl||'').replace(/\/$/,'');
 /* v nainstalované appce se přihlašuje kódem z e-mailu (odkaz by otevřel prohlížeč) */
 async function accVerifyCode(email,code){const r=await fetch(KCFG.supabaseUrl+'/auth/v1/verify',{method:'POST',headers:{apikey:KCFG.anonKey,'content-type':'application/json'},body:JSON.stringify({type:'email',email,token:String(code).trim()})});
-  if(!r.ok)throw 0;const d=await r.json();ACC.s={at:d.access_token,rt:d.refresh_token,exp:Date.now()+(d.expires_in||3600)*1000,email:(d.user&&d.user.email)||email};accSave();accPlan()}
+  if(!r.ok)throw 0;const d=await r.json();ACC.s={at:d.access_token,rt:d.refresh_token,exp:Date.now()+(d.expires_in||3600)*1000,email:(d.user&&d.user.email)||email};accSave();accPlan();setTimeout(()=>{if(typeof afterLogin==='function')afterLogin()},0)}
 async function accSendLink(email,next){const back=(IS_NATIVE&&SITE?SITE+'/app/':location.origin+location.pathname)+(next&&!IS_NATIVE?'?next='+encodeURIComponent(next):'');
   const r=await fetch(KCFG.supabaseUrl+'/auth/v1/otp?redirect_to='+encodeURIComponent(back),{method:'POST',headers:{apikey:KCFG.anonKey,'content-type':'application/json'},body:JSON.stringify({email,create_user:true})});if(!r.ok)throw 0}
 async function accPlan(){const tok=await accToken();if(!tok)return;try{const r=await fetch(KCFG.supabaseUrl+'/rest/v1/profiles?select=plan,plan_until&limit=1',{headers:{apikey:KCFG.anonKey,authorization:'Bearer '+tok}});const d=await r.json();const p=d&&d[0];
@@ -890,7 +906,7 @@ let S=null, saveT=0;
 const replacer=(k,v)=>(k&&k[0]==='_')?undefined:v;
 try{const raw=localStorage.getItem(KEY);if(raw){const p=JSON.parse(raw);if(p&&p.v===2)S=p}}catch(e){}
 if(!S)S=defaultState();
-function migrate(){if(S.profile&&!S.profile.mode)S.profile.mode='auto';if(S.prefs&&S.prefs.look)S.prefs.look=Object.assign({theme:'system',accent:'teal',hand:'Kalam',toolbar:'top',fab:'m'},S.prefs.look);if(!S.review)S.review=seedReview();if(!S.review.stats)S.review.stats={};if(!S.review.streak)S.review.streak={d:'',n:0};S.profile=Object.assign(JSON.parse(JSON.stringify(DEF_PROFILE)),S.profile);S.prefs=Object.assign(JSON.parse(JSON.stringify(DEF_PREFS)),S.prefs);
+function migrate(){if(S.profile&&!S.profile.mode)S.profile.mode='auto';if(S.prefs&&S.prefs.watch==null)S.prefs.watch=true;if(S.prefs&&S.prefs.look)S.prefs.look=Object.assign({theme:'system',accent:'teal',hand:'Kalam',toolbar:'top',fab:'m'},S.prefs.look);if(!S.review)S.review=seedReview();if(!S.review.stats)S.review.stats={};if(!S.review.streak)S.review.streak={d:'',n:0};S.profile=Object.assign(JSON.parse(JSON.stringify(DEF_PROFILE)),S.profile);S.prefs=Object.assign(JSON.parse(JSON.stringify(DEF_PREFS)),S.prefs);
   S.notebooks.forEach(nb=>nb.pages.forEach(pg=>{if(pg.rev==null)pg.rev=0;if(pg.ocrRev==null){pg.ocr='';pg.ocrRev=0}}))}
 migrate();
 /* IndexedDB: hlavní úložiště bez limitu 5 MB (fotky), localStorage jen jako rychlá záloha */
@@ -938,18 +954,38 @@ function drawPaper(ctx,nb,h){const p=paperOf(nb);ctx.fillStyle=p.bg;ctx.fillRect
   if(t==='lines'){ctx.beginPath();for(let y=100;y<h-40;y+=34){ctx.moveTo(0,y+.5);ctx.lineTo(W,y+.5)}ctx.stroke()}
   else if(t==='squares'){ctx.save();ctx.globalAlpha=.8;ctx.beginPath();for(let x=25;x<W;x+=25){ctx.moveTo(x+.5,0);ctx.lineTo(x+.5,h)}for(let y=25;y<h;y+=25){ctx.moveTo(0,y+.5);ctx.lineTo(W,y+.5)}ctx.stroke();ctx.restore()}
   else if(t==='dots'){for(let x=25;x<W;x+=25)for(let y=25;y<h;y+=25)ctx.fillRect(x-1.1,y-1.1,2.2,2.2)}}
-function drawStroke(ctx,o,ink){const p=o.pts;if(!p.length)return;ctx.save();ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle=ink;
-  if(o.tool==='hl'){ctx.globalAlpha=.38;ctx.lineWidth=o.w;ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);for(let i=1;i<p.length;i++)ctx.lineTo(p[i][0],p[i][1]);if(p.length===1)ctx.lineTo(p[0][0]+.1,p[0][1]);ctx.stroke();ctx.restore();return}
+/* typy per: pero, fineliner, tužka, fix, štětec, kaligrafie, sprej */
+const BRUSHES=[['pen','Pero','Ballpoint'],['fine','Fineliner','Fineliner'],['pencil','Tužka','Pencil'],['marker','Fix','Marker'],['brush','Štětec','Brush'],['calli','Kaligrafie','Calligraphy'],['spray','Sprej','Spray']];
+function srand(id){let h=2166136261;for(const c of String(id||'x'))h=Math.imul(h^c.charCodeAt(0),16777619);return ()=>{h=Math.imul(h^(h>>>15),2246822507);h=Math.imul(h^(h>>>13),3266489909);h^=h>>>16;return (h>>>0)/4294967296}}
+function polyPath(ctx,p){ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);if(p.length===1){ctx.lineTo(p[0][0]+.1,p[0][1]);return}
+  for(let i=1;i<p.length-1;i++){const mx=(p[i][0]+p[i+1][0])/2,my=(p[i][1]+p[i+1][1])/2;ctx.quadraticCurveTo(p[i][0],p[i][1],mx,my)}const l=p[p.length-1];ctx.lineTo(l[0],l[1])}
+function drawBrush(ctx,o,ink){const p=o.pts,b=o.brush,w=o.w;
+  if(b==='fine'){ctx.lineWidth=w;if(o.straight){ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);for(const q of p)ctx.lineTo(q[0],q[1])}else polyPath(ctx,p);ctx.stroke();return}
+  if(b==='marker'){ctx.globalAlpha*=.88;ctx.lineWidth=w*2.2;ctx.lineCap='square';ctx.lineJoin='round';polyPath(ctx,p);ctx.stroke();return}
+  if(b==='pencil'){const r=srand(o.id);ctx.globalAlpha*=.55;for(let k=0;k<3;k++){ctx.lineWidth=Math.max(.5,w*(.35+.25*k));ctx.beginPath();
+      p.forEach((q,i)=>{const j=w*.45,x=q[0]+(r()-.5)*j,y=q[1]+(r()-.5)*j;if(i)ctx.lineTo(x,y);else ctx.moveTo(x,y)});if(p.length===1)ctx.lineTo(p[0][0]+.3,p[0][1]);ctx.stroke()}return}
+  if(b==='brush'){const n=p.length;if(n<3){ctx.lineWidth=w;polyPath(ctx,p);ctx.stroke();return}let px=p[0][0],py=p[0][1];
+    for(let i=1;i<n-1;i++){const mx=(p[i][0]+p[i+1][0])/2,my=(p[i][1]+p[i+1][1])/2,pr=p[i][2]??.5,taper=Math.min(1,i/6,(n-1-i)/6);
+      ctx.lineWidth=Math.max(.6,w*(.35+1.9*pr)*(.25+.75*taper));ctx.beginPath();ctx.moveTo(px,py);ctx.quadraticCurveTo(p[i][0],p[i][1],mx,my);ctx.stroke();px=mx;py=my}return}
+  if(b==='calli'){const a=-Math.PI/4,nx=Math.cos(a)*w*1.6,ny=Math.sin(a)*w*1.6;ctx.fillStyle=ink;ctx.lineWidth=.8;
+    for(let i=0;i<p.length;i++){const q=p[i],r0=p[Math.max(0,i-1)];ctx.beginPath();ctx.moveTo(r0[0]-nx,r0[1]-ny);ctx.lineTo(r0[0]+nx,r0[1]+ny);ctx.lineTo(q[0]+nx,q[1]+ny);ctx.lineTo(q[0]-nx,q[1]-ny);ctx.closePath();ctx.fill();ctx.stroke()}return}
+  if(b==='spray'){const r=srand(o.id),rad=w*3+3;ctx.fillStyle=ink;ctx.globalAlpha*=.8;let last=null;
+    for(const q of p){if(last&&Math.hypot(q[0]-last[0],q[1]-last[1])<rad*.35)continue;last=q;const n=Math.round(rad*1.6);
+      const ds=Math.max(.9,w*.32);for(let k=0;k<n;k++){const ang=r()*Math.PI*2,d=Math.sqrt(r())*rad;ctx.fillRect(q[0]+Math.cos(ang)*d,q[1]+Math.sin(ang)*d,ds,ds)}}return}}
+function drawStroke(ctx,o,ink){const p=o.pts;if(!p.length)return;ctx.save();ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle=ink;if(o.op&&o.op<1)ctx.globalAlpha=o.op;
+  if(o.brush&&o.brush!=='pen'&&o.tool!=='hl'){drawBrush(ctx,o,ink);ctx.restore();return}
+  if(o.tool==='hl'){ctx.globalAlpha=.38*(o.op||1);ctx.lineWidth=o.w;ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);for(let i=1;i<p.length;i++)ctx.lineTo(p[i][0],p[i][1]);if(p.length===1)ctx.lineTo(p[0][0]+.1,p[0][1]);ctx.stroke();ctx.restore();return}
   if(p.length<3){ctx.lineWidth=o.w;ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);const q=p[p.length-1];ctx.lineTo(q[0]+.1,q[1]);ctx.stroke();ctx.restore();return}
   let px=p[0][0],py=p[0][1];
   for(let i=1;i<p.length-1;i++){const mx=(p[i][0]+p[i+1][0])/2,my=(p[i][1]+p[i+1][1])/2;const pr=p[i][2]??.5;
     ctx.lineWidth=o.w*(.5+pr);ctx.beginPath();ctx.moveTo(px,py);ctx.quadraticCurveTo(p[i][0],p[i][1],mx,my);ctx.stroke();px=mx;py=my}
   const l=p[p.length-1];ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(l[0],l[1]);ctx.stroke();ctx.restore()}
-function drawShape(ctx,o,ink){ctx.save();ctx.strokeStyle=ink;ctx.fillStyle=ink;ctx.lineWidth=o.w;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();
+function drawShape(ctx,o,ink){ctx.save();if(o.op&&o.op<1)ctx.globalAlpha=o.op;ctx.strokeStyle=ink;ctx.fillStyle=ink;ctx.lineWidth=o.w;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();
   if(o.kind==='line'){ctx.moveTo(o.x1,o.y1);ctx.lineTo(o.x2,o.y2)}
   else if(o.kind==='rect'){rr(ctx,o.x,o.y,o.rw,o.rh,Math.min(4,Math.abs(o.rw)/4,Math.abs(o.rh)/4))}
   else if(o.kind==='ellipse'){ctx.ellipse(o.cx,o.cy,Math.max(.5,o.rx),Math.max(.5,o.ry),0,0,Math.PI*2)}
-  if(o.fill)ctx.fill();else ctx.stroke();ctx.restore()}
+  if(o.fill)ctx.fill();else ctx.stroke();
+  if(o.arrow&&o.kind==='line'){const a=Math.atan2(o.y2-o.y1,o.x2-o.x1),hl=Math.max(10,o.w*4.5);ctx.beginPath();ctx.moveTo(o.x2-hl*Math.cos(a-.42),o.y2-hl*Math.sin(a-.42));ctx.lineTo(o.x2,o.y2);ctx.lineTo(o.x2-hl*Math.cos(a+.42),o.y2-hl*Math.sin(a+.42));ctx.stroke()}ctx.restore()}
 function drawText(ctx,o,ink){ctx.save();ctx.font=fontOf(o);ctx.fillStyle=ink;ctx.textBaseline='alphabetic';o.text.split('\n').forEach((l,i)=>ctx.fillText(l,o.x,o.y+i*o.size*1.25));ctx.restore()}
 function cardLines(o){const out=[],maxW=o.w-34;
   for(const raw of o.text.split('\n')){let l=raw.trim();if(!l){if(out.length&&!out[out.length-1].gap)out.push({gap:true});continue}
@@ -1016,12 +1052,17 @@ function drawObj(ctx,o,nb,force){const ink=force||inkOf(o.color,nb);
   else if(o.type==='image')drawImage(ctx,o);else if(o.type==='graph')drawGraph(ctx,o,nb);else if(o.type==='math')drawMath(ctx,o,ink)}
 function mathBox(o){const info=mathInfo(o.tex,true,'#000');if(info)return {w:info.w*o.scale,h:info.h*o.scale};mctx.font=`28px ${HF()}`;return {w:Math.max(30,mctx.measureText(texToUni(o.tex)).width),h:40}}
 function drawMath(ctx,o,ink){const info=mathInfo(o.tex,true,ink);if(info){if(info.img.complete&&info.img.naturalWidth)ctx.drawImage(info.img,o.x,o.y,info.w*o.scale,info.h*o.scale)}else{ctx.save();ctx.font=`28px ${HF()}`;ctx.fillStyle=ink;ctx.fillText(texToUni(o.tex),o.x,o.y+30);ctx.restore()}}
-function renderPage(ctx,nb,pg,opt={}){if(!opt.noPaper)drawPaper(ctx,nb,pg.h);for(const o of pg.objs){if(opt.hide&&opt.hide.has(o.id))continue;if(opt.only&&!opt.only.has(o.id))continue;drawObj(ctx,o,nb,opt.ink)}}
+function renderPage(ctx,nb,pg,opt={}){if(!opt.noPaper)drawPaper(ctx,nb,pg.h);const LY=nb.layers;
+  const one=o=>{if(opt.hide&&opt.hide.has(o.id))return;if(opt.only&&!opt.only.has(o.id))return;drawObj(ctx,o,nb,opt.ink)};
+  if(!LY||LY.length<2){for(const o of pg.objs)one(o);return}
+  for(let i=0;i<LY.length;i++){if(LY[i].hidden)continue;for(const o of pg.objs)if(Math.min(LY.length-1,o.ly||0)===i)one(o)}}
+function onLayer(o){if(!ED||!ED.nb.layers||ED.nb.layers.length<2)return true;return Math.min(ED.nb.layers.length-1,o.ly||0)===ED.layer}
+function layerBlocked(){const Y=ED&&ED.nb.layers&&ED.nb.layers[ED.layer];if(!Y||ED.nb.layers.length<2)return '';return Y.hidden?L('Aktivní vrstva je skrytá – zapni ji ve Vrstvách.','The active layer is hidden – show it in Layers.'):Y.locked?L('Aktivní vrstva je zamčená.','The active layer is locked.'):''}
 
 /* geometrie */
 function bboxPts(p){let a=1e9,b=1e9,c=-1e9,d=-1e9;for(const q of p){if(q[0]<a)a=q[0];if(q[1]<b)b=q[1];if(q[0]>c)c=q[0];if(q[1]>d)d=q[1]}return {x:a,y:b,w:c-a,h:d-b}}
 function bboxOf(o){
-  if(o.type==='stroke'){const b=bboxPts(o.pts),r=o.w/2+1;return {x:b.x-r,y:b.y-r,w:b.w+2*r,h:b.h+2*r}}
+  if(o.type==='stroke'){const b=bboxPts(o.pts),r=o.w*({marker:1.2,calli:1.7,spray:3.2,brush:1.3}[o.brush]||.5)+3;return {x:b.x-r,y:b.y-r,w:b.w+2*r,h:b.h+2*r}}
   if(o.type==='text'){mctx.font=fontOf(o);const ls=o.text.split('\n');const w=Math.max(8,...ls.map(l=>mctx.measureText(l).width));return {x:o.x,y:o.y-o.size*.95,w,h:o.size*1.25*ls.length}}
   if(o.type==='card'){layoutCard(o);return {x:o.x,y:o.y,w:o.w,h:o._h}}
   if(o.type==='image'||o.type==='graph')return {x:o.x,y:o.y,w:o.w,h:o.h};
@@ -1043,7 +1084,7 @@ function translate(o,dx,dy){if(o.type==='stroke')o.pts.forEach(p=>{p[0]+=dx;p[1]
   else if(o.kind==='line'){o.x1+=dx;o.x2+=dx;o.y1+=dy;o.y2+=dy}else if(o.kind==='rect'){o.x+=dx;o.y+=dy}else{o.cx+=dx;o.cy+=dy}}
 function segDist(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l=dx*dx+dy*dy;let t=l?((px-ax)*dx+(py-ay)*dy)/l:0;t=clamp(t,0,1);return Math.hypot(px-(ax+t*dx),py-(ay+t*dy))}
 function inRect(x,y,b,pad=0){return x>=b.x-pad&&x<=b.x+b.w+pad&&y>=b.y-pad&&y<=b.y+b.h+pad}
-function hit(o,x,y,r){if(o.locked)return false;
+function hit(o,x,y,r){if(o.locked||!onLayer(o))return false;
   if(o.type==='stroke'){const p=o.pts;if(!inRect(x,y,bboxOf(o),r))return false;if(p.length===1)return Math.hypot(x-p[0][0],y-p[0][1])<r+o.w;for(let i=1;i<p.length;i++)if(segDist(x,y,p[i-1][0],p[i-1][1],p[i][0],p[i][1])<r+o.w/2)return true;return false}
   if(o.type==='text'||o.type==='card'||o.type==='image'||o.type==='graph'||o.type==='math')return inRect(x,y,bboxOf(o));
   if(o.kind==='line')return segDist(x,y,o.x1,o.y1,o.x2,o.y2)<r+o.w;
@@ -1187,7 +1228,7 @@ function nbDialog(nb){const isNew=!nb;
        <div class="group"><span class="eyebrow">Vzor obálky</span><div class="row">${Object.entries(PATS).map(([k,v])=>`<button type="button" class="pill" data-cp="${k}">${v.n}</button>`).join('')}</div></div>
        <div class="group"><span class="eyebrow">Papír</span><div class="row">${Object.entries(PTYPES).map(([k,n])=>`<button type="button" class="pill" data-pt="${k}">${n}</button>`).join('')}</div>
          <div class="row">${Object.entries(PAPERS).map(([k,v])=>`<button type="button" class="pill" data-pc="${k}"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${v.bg};box-shadow:0 0 0 1px var(--line);margin-right:6px;vertical-align:-1px"></span>${v.n}</button>`).join('')}</div></div>
-       <div class="group"><span class="eyebrow">Uspořádání</span><div class="row"><button type="button" class="pill" data-lay="pages">Po stránkách</button><button type="button" class="pill" data-lay="endless">Nekonečný list</button></div></div>
+       <div class="group"><span class="eyebrow">Uspořádání</span><div class="row"><button type="button" class="pill" data-lay="pages">Po stránkách</button><button type="button" class="pill" data-lay="endless">Nekonečný list</button><button type="button" class="pill" data-preset="canvas">🎨 ${L('Plátno na kreslení','Drawing canvas')}</button></div></div>
      </div></div></div>
    <div class="modal-f"><div class="row">${isNew?'':'<button type="button" class="btn" data-pdf>Exportovat PDF</button><button type="button" class="btn danger" data-del>Smazat sešit</button>'}</div><div class="row"><button type="button" class="btn" data-x>Zrušit</button><button type="button" class="btn primary" data-save>${isNew?'Vytvořit':'Uložit'}</button></div></div>`);
   function sync(){const nbLike={title:d.title||'Bez názvu',subject:d.subject,cover:d.cover};$('#pvBook',m).innerHTML=bookHTML(nbLike);
@@ -1200,7 +1241,7 @@ function nbDialog(nb){const isNew=!nb;
   m.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const s=b.dataset;
     if('x' in s)return closeModal();
     if('pdf' in s){exportPDF(nb,b);return}
-    if(s.cc)d.cover.color=s.cc;else if(s.cp)d.cover.pattern=s.cp;else if(s.pt)d.paper.type=s.pt;else if(s.pc)d.paper.color=s.pc;else if(s.lay)d.layout=s.lay;
+    if(s.cc)d.cover.color=s.cc;else if(s.cp)d.cover.pattern=s.cp;else if(s.pt)d.paper.type=s.pt;else if(s.pc)d.paper.color=s.pc;else if(s.lay)d.layout=s.lay;else if(s.preset==='canvas'){d.layout='endless';d.paper.type='blank';d.paper.color='white'}
     else if('del' in s){if(!delArmed){delArmed=true;b.textContent='Opravdu smazat? Ťukni znovu';return}
       cloudDelete(nb);S.notebooks=S.notebooks.filter(n=>n!==nb);save();closeModal();if(!$('#ed').hidden)closeEditor();renderLib();toast('Sešit smazán');return}
     else if('save' in s){const title=d.title.trim()||'Bez názvu';
@@ -1224,10 +1265,11 @@ function settingsDialog(focus){closeRemBanner();const p=S.profile,f=S.prefs;let 
       <label class="fld">Co by měl pomocník vědět<input id="sNote" value="${esc(p.aiNote)}" placeholder="např. učíme se ze skript doc. Nováka, matika mi moc nejde" autocomplete="off"></label></div>
     <div class="group"><span class="eyebrow">Výchozí pomoc</span><div class="opts c2">${modeOpts(p)}</div></div>
     <div class="group"><span class="eyebrow">AI model</span><div class="opts c3">${Object.entries(AIS).map(([k,v])=>`<button type="button" class="opt" data-ai="${k}" aria-pressed="${p.ai===k}"><b>${v.n}</b><small>${v.d}</small></button>`).join('')}</div>
-      <p class="fine" style="margin:0">V tomhle prototypu odpovídá Claude. V hotové appce se pod těmito třemi volbami schovají levnější modely (např. Gemini Flash).</p></div>
-    <div class="group"><span class="eyebrow">Tvoje data</span><div class="promise"><b>Zápisky patří tobě.</b>Kdykoli si je stáhneš jako PDF nebo celou zálohu a přeneseš je jinam. Žádná funkce, kterou máš, ti nezmizí za paywall.</div>
+      <p class="fine" style="margin:0">${HAS_API?L('Odpovídá Gemini. U Loopnote Plus může volba Nejchytřejší běžet na Claudovi.','Answers come from Gemini. With Loopnote Plus, Smartest can run on Claude.'):'V tomhle prototypu odpovídá Claude. V hotové appce se pod těmito třemi volbami schovají levnější modely (např. Gemini Flash).'}</p></div>
+    ${accountHTML()}${androidBubbleHTML()}<div class="group"><span class="eyebrow">Tvoje data</span><div class="promise"><b>Zápisky patří tobě.</b>Kdykoli si je stáhneš jako PDF nebo celou zálohu a přeneseš je jinam. Žádná funkce, kterou máš, ti nezmizí za paywall.</div>
       <div class="row"><button type="button" class="btn" data-backup>Stáhnout zálohu (.json)</button><button type="button" class="btn" data-import>Obnovit ze zálohy</button><button type="button" class="btn plus" data-plans>Loopnote Plus</button></div></div>
     <div class="group"><span class="eyebrow">Psaní</span>
+      <button type="button" class="toggle" data-tg="watch" aria-pressed="${f.watch!==false}"><span><b>${L('Hlídat chyby při psaní','Watch for mistakes as I write')}</b><small>${L('Když se při psaní zastavíš, pomocník mrkne na nový zápis. Když vidí chybu, dá na okraj červenou tečku – ťukneš a poradí.','When you pause, the helper glances at what you just wrote. If it spots a mistake, a red dot appears in the margin – tap it for a hint.')}</small></span><span class="knob"></span></button>
       <button type="button" class="toggle" data-tg="fingerScroll" aria-pressed="${f.fingerScroll}"><span><b>S Pencilem prstem jen posouvám</b><small>Jakmile začneš psát perem, prst stránku posouvá a dlaň nic nenakreslí.</small></span><span class="knob"></span></button>
       <button type="button" class="toggle" data-tg="snap" aria-pressed="${f.snap}"><span><b>Narovnávat tvary</b><small>Na konci čáry podrž pero a čára, obdélník nebo elipsa se narovná.</small></span><span class="knob"></span></button></div>
     <div class="group" id="setRemind"><span class="eyebrow">${L('Připomínky','Reminders')}</span>
@@ -1279,11 +1321,11 @@ let ED=null, drag=null, penSeen=false;
 const touches=new Map();
 function openNotebook(id,pageIdx){const nb=S.notebooks.find(n=>n.id===id);if(!nb)return;
   if(ED)closeEditor(true);
-  ED={nb,tool:'pen',color:S.prefs.palette.includes(S.prefs.lastColor)?S.prefs.lastColor:S.prefs.palette[0],wi:1,hl:HL_COLORS[0],hwi:1,textFont:'hand',views:[],sel:null,ai:null,hist:[],redo:[],scale:1,zoom:1};
+  const PP=S.prefs.pen||{};ED={nb,layer:nb.layers?nb.layers.length-1:0,shape:PP.shape||'rect',tool:'pen',color:S.prefs.palette.includes(S.prefs.lastColor)?S.prefs.lastColor:S.prefs.palette[0],wi:PP.wi??2,brush:PP.brush||'pen',op:PP.op||1,hl:HL_COLORS[0],hwi:1,textFont:'hand',views:[],sel:null,ai:null,hist:[],redo:[],scale:1,zoom:1};
   show('ed');$('#edTitle').value=nb.title;$('#savedLbl').textContent='Uloženo';renderTools();buildPages();updateUndo();updateZoom();$('#scroller').scrollTop=0;
   if(pageIdx&&ED.views[pageIdx])requestAnimationFrame(()=>ED.views[pageIdx].wrap.scrollIntoView({block:'start'}));
   if(!S.prefs.hinted){S.prefs.hinted=true;save();setTimeout(()=>toast('Tip: ťukni na plovoucí kuličku a zakroužkuj, s čím chceš pomoct. Kuličku přesuneš tažením.',5200),500)}}
-function closeEditor(silent){closeAI();clearSel();commitText();ED=null;if(silent)return;show('lib');renderLib();runSearch($('#search').value)}
+function closeEditor(silent){if(WATCH){WATCH.marks=[];WATCH.since.clear();clearTimeout(WATCH.t)}closeAI();clearSel();commitText();ED=null;if(silent)return;show('lib');renderLib();runSearch($('#search').value)}
 $('#edMenu').onclick=e=>{if(!ED)return;const z=Math.round(ED.zoom*100);
   openPop(e.currentTarget,[['notes','Zeptej se svých zápisků'],['learn','Učení a zkoušky'],['practice','Procvičit z tohoto sešitu'],['rec','Nahrávka přednášky'],['share',ED.nb.shared?'Sdíleno se spolužáky':'Sdílet se spolužáky'],['photo','Ofotit sešit → text'],['paper','Papír a vzhled'],['deck',L('Prezentace z poznámek','Presentation from notes')],['pdf','Exportovat PDF']],k=>{if(k==='deck')return deckDialog(ED.nb.id);
     if(k==='notes')openNotes();else if(k==='learn')learnHub(ED.nb.id);else if(k==='rec')openRecBar();else if(k==='share')shareDialog(ED.nb);else if(k==='practice')practiceDialog(ED.nb.id);else if(k==='photo')startPhotoScan(ED.nb.id);else if(k==='paper')nbDialog(ED.nb);else if(k==='pdf')exportPDF(ED.nb,null)},
@@ -1423,33 +1465,56 @@ function graphDialog(existing){const g=existing?JSON.parse(JSON.stringify(existi
 $('#edBack').onclick=()=>{if(ED)touch(ED.nb);closeEditor()};
 $('#edTitle').addEventListener('change',e=>{if(!ED)return;ED.nb.title=e.target.value.trim()||'Bez názvu';touch(ED.nb)});
 
+function drawBrushPrev(root){root.querySelectorAll('canvas[data-bprev]').forEach(cv=>{const c=cv.getContext('2d');c.clearRect(0,0,cv.width,cv.height);const pts=[];for(let i=0;i<=40;i++){const x=8+i*2.6;pts.push([x,18+Math.sin(i/40*Math.PI*2)*9,.25+.6*Math.sin(i/40*Math.PI)])}
+  const ink=getComputedStyle(document.documentElement).getPropertyValue('--fg').trim()||'#222';drawStroke(c,{id:'prev'+cv.dataset.bprev,tool:'pen',brush:cv.dataset.bprev,w:Math.min(PEN_W[ED.wi],4.4),op:ED.op,pts},ink)})}
 function swatchHTML(c){return `<span class="sw mini ${c==='auto'?'auto':''}" style="${c==='auto'?'':'background:'+c}"></span>`}
-function renderTools(){if(!ED)return;const t=ED.tool;const tools=[['pen','Pero'],['hl','Zvýrazňovač'],['eraser','Guma'],['lasso','Výběr'],['text','Text']];
-  let h=tools.map(([k,n])=>`<button type="button" class="tool" data-tool="${k}" aria-pressed="${t===k}" aria-label="${n}" title="${n}">${svg(k)}<span class="lbl">${n}</span></button>`).join('')+'<span class="sep"></span>';
+const DRAWT={shape:['Tvary','Shapes'],fill:['Kbelík','Fill'],picker:['Kapátko','Eyedropper']};
+const SHAPES=[['line','Čára','Line'],['arrow','Šipka','Arrow'],['rect','Obdélník','Rectangle'],['ellipse','Elipsa','Ellipse'],['circle','Kružítko (kruh ze středu)','Compass (circle from centre)'],['tri','Trojúhelník','Triangle']];
+function renderTools(){if(!ED)return;if(ED.nb.layers)ED.layer=Math.max(0,Math.min(ED.layer||0,ED.nb.layers.length-1));const t=ED.tool;const tools=[['pen','Pero'],['hl','Zvýrazňovač'],['eraser','Guma'],['lasso','Výběr'],['text','Text']];
+  let h=tools.map(([k,n])=>`<button type="button" class="tool" data-tool="${k}" aria-pressed="${t===k}" aria-label="${n}" title="${n}">${svg(k)}<span class="lbl">${n}</span></button>`).join('');
+  const dk=DRAWT[t]?t:'shape';h+=`<button type="button" class="tool" data-act="draw" aria-pressed="${!!DRAWT[t]}" aria-haspopup="menu" title="${L('Kreslení: tvary, kbelík, kapátko, pravítko, vrstvy','Drawing: shapes, fill, eyedropper, ruler, layers')}">${svg(dk)}<span class="lbl">${esc(L(...DRAWT[dk]))}</span></button>`;
+  if(ED.nb.layers&&ED.nb.layers.length>1)h+=`<button type="button" class="tool" data-act="layers" title="${L('Vrstvy','Layers')}">${svg('layers')}<span class="lbl">${esc(ED.nb.layers[ED.layer].name)}</span></button>`;
+  if(RUL&&RUL.on)h+=`<button type="button" class="tool" data-act="ruler" aria-pressed="true" title="${L('Schovat pravítko','Hide ruler')}">${svg('ruler')}</button>`;
+  h+='<span class="sep"></span>';
   let style='';
-  if(t==='pen')style=`${swatchHTML(ED.color)}<i class="wdot" style="width:${[4,6.5,9.5][ED.wi]}px;height:${[4,6.5,9.5][ED.wi]}px"></i>`;
+  if(t==='pen'){const d=[3,4,6,8,11,14][ED.wi]||6;style=`${swatchHTML(ED.color)}<i class="wdot" style="width:${d}px;height:${d}px;opacity:${ED.op}"></i><span>${esc(L(...BRUSHES.find(b=>b[0]===ED.brush).slice(1)))}</span>`}
   else if(t==='hl')style=`${swatchHTML(ED.hl)}<i class="wdot" style="width:${[6,9,12][ED.hwi]}px;height:${[6,9,12][ED.hwi]}px"></i>`;
   else if(t==='eraser')style=`<span>${S.prefs.eraser==='part'?'Jen kus':'Celé tahy'}</span>`;
   else if(t==='text')style=`${swatchHTML(ED.color)}<span>${ED.textFont==='print'?'Tiskací':'Ruční'}</span>`;
+  else if(t==='shape'){const d=[3,4,6,8,11,14][ED.wi]||6;style=`${swatchHTML(ED.color)}<i class="wdot" style="width:${d}px;height:${d}px"></i><span>${esc(L(...SHAPES.find(x=>x[0]===ED.shape).slice(1)))}</span>`}
+  else if(t==='fill')style=`${swatchHTML(ED.color)}<span>${Math.round(ED.op*100)} %</span>`;
   if(style)h+=`<button type="button" class="tool stylebtn" data-act="style" aria-haspopup="menu" aria-label="Barva a tloušťka" title="Barva a tloušťka">${style}<svg class="i chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>`;
+  if(t==='pen')(S.prefs.penSets||[]).forEach((ps,i)=>{const d=[3,4,6,8,11,14][ps.wi]||6;h+=`<button type="button" class="tool penset" data-pset="${i}" title="${esc(L(...BRUSHES.find(b=>b[0]===ps.brush).slice(1)))} · ${L('pravý klik = odebrat','right-click = remove')}"><i class="wdot" style="width:${d}px;height:${d}px;background:${ps.color==='auto'?'currentColor':ps.color};opacity:${ps.op||1}"></i><small>${esc(L(...BRUSHES.find(b=>b[0]===ps.brush).slice(1)).slice(0,3))}</small></button>`});
   h+=`<button type="button" class="tool" data-act="insert" aria-haspopup="menu" title="Vložit">${svg('plus')}<span class="lbl">Vložit</span></button>`;
   $('#tools').innerHTML=h}
-function applyToolOpt(d){if(d.er){S.prefs.eraser=d.er;save()}else if(d.c){ED.color=d.c;S.prefs.lastColor=d.c;save();if(ED.sel)recolorSel()}
-  else if(d.hlc)ED.hl=d.hlc;else if(d.w){if(ED.tool==='hl')ED.hwi=+d.w;else ED.wi=+d.w}else if(d.font){ED.textFont=d.font}else return false;renderTools();return true}
+function savePen(){S.prefs.pen={brush:ED.brush,wi:ED.wi,op:ED.op};save()}
+function applyToolOpt(d){if(d.psave!=null){const sets=S.prefs.penSets||(S.prefs.penSets=[]);sets.push({brush:ED.brush,color:ED.color,wi:ED.wi,op:ED.op});if(sets.length>5)sets.shift();save();toast(L('Pero uloženo – najdeš ho v liště vedle barvy.','Pen saved – it is in the toolbar next to the colour.'));renderTools();return true}
+  if(d.shapek){ED.shape=d.shapek;S.prefs.pen=Object.assign({},S.prefs.pen,{shape:d.shapek});save();renderTools();closePop();return false}
+  if(d.brush){ED.brush=d.brush;savePen()}else if(d.op){ED.op=+d.op;savePen()}else if(d.er){S.prefs.eraser=d.er;save()}else if(d.c){ED.color=d.c;S.prefs.lastColor=d.c;save();if(ED.sel)recolorSel()}
+  else if(d.hlc)ED.hl=d.hlc;else if(d.w){if(ED.tool==='hl')ED.hwi=+d.w;else{ED.wi=+d.w;savePen()}}else if(d.font){ED.textFont=d.font}else return false;renderTools();return true}
 function styleHTML(){const t=ED.tool;let h='';
   if(t==='eraser')return `<div class="pop-sec"><span class="eyebrow">Guma maže</span><div class="seg"><button type="button" data-er="stroke" aria-pressed="${S.prefs.eraser==='stroke'}">Celé tahy</button><button type="button" data-er="part" aria-pressed="${S.prefs.eraser==='part'}">Jen kus</button></div></div>`;
   if(t==='hl')h+=`<div class="pop-sec"><span class="eyebrow">Barva</span><div class="row">${HL_COLORS.map(c=>`<button type="button" class="sw" data-hlc="${c}" style="background:${c}" aria-pressed="${ED.hl===c}" aria-label="Barva zvýrazňovače"></button>`).join('')}</div></div>`;
   else h+=`<div class="pop-sec"><span class="eyebrow">Barva</span><div class="row">${S.prefs.palette.map(c=>`<button type="button" class="sw ${c==='auto'?'auto':''}" data-c="${c}" style="${c==='auto'?'':'background:'+c}" aria-pressed="${ED.color===c}" aria-label="${c==='auto'?'Inkoust podle papíru':'Barva '+c}"></button>`).join('')}<label class="sw add" title="Vlastní barva" aria-label="Vlastní barva">${svg('plus')}<input type="color" id="addColor" value="#0f7c6b"></label></div></div>`;
-  if(t==='pen'||t==='hl')h+=`<div class="pop-sec"><span class="eyebrow">Tloušťka</span><div class="row">${[0,1,2].map(i=>{const px=t==='hl'?[6,9,12][i]:[4,6.5,9.5][i];return `<button type="button" class="wbtn" data-w="${i}" aria-pressed="${(t==='hl'?ED.hwi:ED.wi)===i}" aria-label="Tloušťka ${i+1}"><i style="width:${px}px;height:${px}px"></i></button>`}).join('')}</div></div>`;
+  if(t==='pen')h=`<div class="pop-sec"><span class="eyebrow">${L('Typ pera','Pen type')}</span><div class="brushes">${BRUSHES.map(([k,cs,en])=>`<button type="button" class="brushbtn" data-brush="${k}" aria-pressed="${ED.brush===k}"><canvas data-bprev="${k}" width="120" height="36"></canvas><span>${esc(L(cs,en))}</span></button>`).join('')}</div></div>`+h;
+  if(t==='pen'||t==='hl')h+=`<div class="pop-sec"><span class="eyebrow">Tloušťka</span><div class="row">${(t==='hl'?[0,1,2]:[0,1,2,3,4,5]).map(i=>{const px=t==='hl'?[6,9,12][i]:[3,4,6,8,11,14][i];return `<button type="button" class="wbtn" data-w="${i}" aria-pressed="${(t==='hl'?ED.hwi:ED.wi)===i}" aria-label="Tloušťka ${i+1}"><i style="width:${px}px;height:${px}px"></i></button>`}).join('')}</div></div>`;
+  if(t==='shape')h=`<div class="pop-sec"><span class="eyebrow">${L('Tvar','Shape')}</span><div class="row">${SHAPES.map(([k,cs,en])=>`<button type="button" class="pill" data-shapek="${k}" aria-pressed="${ED.shape===k}">${esc(L(cs,en))}</button>`).join('')}</div></div>`+h+`<div class="pop-sec"><span class="eyebrow">Tloušťka</span><div class="row">${[0,1,2,3,4,5].map(i=>{const px=[3,4,6,8,11,14][i];return `<button type="button" class="wbtn" data-w="${i}" aria-pressed="${ED.wi===i}"><i style="width:${px}px;height:${px}px"></i></button>`}).join('')}</div></div>`;
+  if(t==='pen'||t==='fill')h+=`<div class="pop-sec"><span class="eyebrow">${L('Krytí','Opacity')}</span><div class="seg">${[1,.75,.5,.25].map(o=>`<button type="button" data-op="${o}" aria-pressed="${ED.op===o}">${Math.round(o*100)} %</button>`).join('')}</div></div>`+(t==='pen'?`<div class="pop-sec"><button type="button" class="btn" data-psave="1">☆ ${L('Uložit toto pero do oblíbených','Save this pen to favourites')}</button></div>`:'');
   if(t==='text')h+=`<div class="pop-sec"><span class="eyebrow">Písmo</span><div class="seg"><button type="button" data-font="hand" aria-pressed="${ED.textFont==='hand'}">Ruční</button><button type="button" data-font="print" aria-pressed="${ED.textFont==='print'}">Tiskací</button></div></div>`;
   return h}
 $('#tools').addEventListener('click',e=>{const b=e.target.closest('button');if(!b||!ED)return;const d=b.dataset;
-  if(d.act==='style'){const p=openPop(b,[],()=>{},styleHTML());p.classList.add('pop-style');
-    p.addEventListener('click',ev=>{const x=ev.target.closest('button');if(!x)return;if(applyToolOpt(x.dataset)){const fresh=styleHTML();p.innerHTML=fresh}});
+  if(d.act==='style'){const p=openPop(b,[],()=>{},styleHTML());p.classList.add('pop-style');drawBrushPrev(p);
+    p.addEventListener('click',ev=>{const x=ev.target.closest('button');if(!x)return;if(applyToolOpt(x.dataset)){const fresh=styleHTML();p.innerHTML=fresh;drawBrushPrev(p)}});
     p.addEventListener('change',ev=>{if(ev.target.id!=='addColor')return;const c=ev.target.value;if(!S.prefs.palette.includes(c)){S.prefs.palette.push(c);if(S.prefs.palette.length>10)S.prefs.palette.splice(1,1)}ED.color=c;save();renderTools();p.innerHTML=styleHTML()});return}
+  if(d.pset!=null){const ps=(S.prefs.penSets||[])[+d.pset];if(ps){Object.assign(ED,{brush:ps.brush,color:ps.color,wi:ps.wi,op:ps.op||1});ED.tool='pen';savePen();renderTools()}return}
+  if(d.act==='draw'){openPop(b,[['shape',L('Tvary a kružítko','Shapes & compass'),L('čára, šipka, obdélník, elipsa, kruh, trojúhelník','line, arrow, rectangle, ellipse, circle, triangle')],['fill',L('Kbelík','Fill bucket'),L('ťukni dovnitř obrysu a vyplní se','tap inside an outline to fill it')],['picker',L('Kapátko','Eyedropper'),L('vezme barvu ze stránky','picks a colour from the page')],['ruler',RUL.on?L('Schovat pravítko','Hide ruler'):L('Pravítko','Ruler'),L('rovné čáry podél hrany, otáčí se','straight lines along the edge, rotatable')],['layers',L('Vrstvy','Layers'),L('kresli na víc vrstev, skrývej je a zamykej','draw on several layers, hide and lock them')]],k=>{commitText();clearSel();
+      if(k==='ruler'){toggleRuler();return}if(k==='layers'){layersPop($('#tools [data-act="draw"]'));return}ED.prevTool=['pen','hl','text'].includes(ED.tool)?ED.tool:'pen';ED.tool=k;renderTools();
+      if(k==='fill')toast(L('Ťukni dovnitř uzavřeného obrysu.','Tap inside a closed outline.'));if(k==='picker')toast(L('Ťukni na barvu na stránce.','Tap a colour on the page.'))});return}
+  if(d.act==='layers'){layersPop(b);return}
+  if(d.act==='ruler'){toggleRuler();return}
   if(d.act==='insert'){openPop(b,[['image','Obrázek','z galerie nebo souboru'],['pdf',L('PDF','PDF'),L('slajdy, skripta, zadání – píšeš rovnou do nich','slides, handouts, worksheets – write right on them')],['photo','Fotka sešitu → text','AI přepíše papírové poznámky'],['graph','Graf','funkce, třeba x² nebo sin x']],k=>{commitText();
     if(k==='image')$('#imgInput').click();else if(k==='pdf'){PDFT.target=ED.nb.id;$('#pdfInput').click()}else if(k==='photo')startPhotoScan(ED.nb.id);else graphDialog(null)});return}
-  if(d.tool){commitText();if(d.tool!=='lasso')clearSel();if(ED.tool===d.tool&&['pen','hl','eraser','text'].includes(d.tool)){const sb=$('#tools [data-act="style"]');if(sb){sb.click();return}}
+  if(d.tool){commitText();if(d.tool!=='lasso')clearSel();if(ED.tool===d.tool&&['pen','hl','eraser','text','shape','fill'].includes(d.tool)){const sb=$('#tools [data-act="style"]');if(sb){sb.click();return}}
     ED.tool=d.tool;if(d.tool==='ai')toast('Zakroužkuj nebo ťukni na místo, kde potřebuješ pomoct');renderTools()}});
 
 function computeScale(){const sc=$('#scroller');const cs=getComputedStyle(sc);const avail=sc.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);ED.scale=clamp(avail/W,.3,1.1)*(ED.zoom||1)}
@@ -1479,6 +1544,8 @@ function paintLive(v){if(!ED||!v.sized)return;const c=v.lctx;c.save();c.setTrans
   const A=ED.ai;if(A&&A.v===v){c.save();c.strokeStyle=isDark(nb)?'#4fd1b6':'#0f7c6b';c.fillStyle=isDark(nb)?'rgba(79,209,182,.10)':'rgba(15,124,107,.08)';c.lineWidth=2;c.setLineDash([7,6]);
     if(A.path&&A.path.length>2){c.beginPath();c.moveTo(A.path[0][0],A.path[0][1]);A.path.forEach(p=>c.lineTo(p[0],p[1]));c.closePath();c.fill();c.stroke()}else{rr(c,A.region.x,A.region.y,A.region.w,A.region.h,10);c.fill();c.stroke()}c.restore();
     if(A.marker){const k=A.marker;c.save();c.strokeStyle='#e03131';c.lineWidth=3;c.setLineDash([]);c.shadowColor='rgba(224,49,49,.35)';c.shadowBlur=8;rr(c,k.x-6,k.y-6,k.w+12,k.h+12,12);c.stroke();c.restore()}}
+  for(const mk of (WATCH?WATCH.marks:[])){if(mk.pg!==v.pg.id)continue;c.save();c.strokeStyle='rgba(224,49,49,.55)';c.lineWidth=2;c.setLineDash([5,4]);rr(c,mk.x-5,mk.y-5,mk.w+10,mk.h+10,8);c.stroke();c.setLineDash([]);
+    const dx=W-30,dy=mk.y+mk.h/2;c.fillStyle='#e03131';c.beginPath();c.arc(dx,dy,11,0,Math.PI*2);c.fill();c.fillStyle='#fff';c.font='bold 15px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText('!',dx,dy+1);c.restore()}
   const sel=ED.sel,spart=sel&&selParts().find(p=>p.v===v);if(spart&&!(drag&&(drag.mode==='move'||drag.mode==='scale'))){const b=spart.bbox;c.save();c.strokeStyle='#228be6';c.fillStyle='rgba(34,139,230,.07)';c.lineWidth=1.5;c.setLineDash([6,5]);c.fillRect(b.x-8,b.y-8,b.w+16,b.h+16);c.strokeRect(b.x-8,b.y-8,b.w+16,b.h+16);c.restore()}
   if(drag&&drag.mode==='move'&&drag.multi&&spart){c.save();c.translate(drag.dx,drag.dy);for(const o of spart.objs)drawObj(c,o,nb);const b=spart.bbox;c.strokeStyle='#228be6';c.lineWidth=1.5;c.setLineDash([6,5]);c.strokeRect(b.x-8,b.y-8,b.w+16,b.h+16);c.restore();if(drag.v!==v)return}
   else if(drag&&drag.mode==='move'&&!drag.multi&&(drag.tv||drag.v)===v){c.save();c.translate(drag.dx,drag.dy);for(const o of ED.sel.objs)drawObj(c,o,nb);const b=ED.sel.bbox;c.strokeStyle='#228be6';c.lineWidth=1.5;c.setLineDash([6,5]);c.strokeRect(b.x-8,b.y-8,b.w+16,b.h+16);c.restore();return}
@@ -1511,7 +1578,7 @@ function pageOff(a,b){return (b.wrap.getBoundingClientRect().top-a.wrap.getBound
 function lassoRenderAll(){if(!drag||drag.mode!=='lasso')return;let lo=1e9,hi=-1e9;for(const p of drag.pts){if(p[1]<lo)lo=p[1];if(p[1]>hi)hi=p[1]}
   for(const v of ED.views){if(v===drag.v)continue;const off=pageOff(drag.v,v);if(hi>=off-20&&lo<=off+v.pg.h+20||v.lassoShown){v.lassoShown=hi>=off-20&&lo<=off+v.pg.h+20;liveRender(v)}}}
 $('#undoBtn').onclick=()=>ED&&restore(ED.hist,ED.redo);$('#redoBtn').onclick=()=>ED&&restore(ED.redo,ED.hist);
-function changed(v){v.pg.rev=(v.pg.rev||0)+1;if(ED)ED.nb.edited=true;redrawBase(v);liveRender(v);touch(ED.nb);maybeExtend(v)}
+function changed(v){if(ED&&ED.nb.layers&&ED.nb.layers.length>1)for(const o of v.pg.objs)if(o.ly==null)o.ly=ED.layer;v.pg.rev=(v.pg.rev||0)+1;if(ED)ED.nb.edited=true;redrawBase(v);liveRender(v);touch(ED.nb);maybeExtend(v)}
 function maybeExtend(v){if(ED.nb.layout!=='endless')return;let maxY=0;for(const o of v.pg.objs){const b=bboxOf(o);maxY=Math.max(maxY,b.y+b.h)}if(maxY>v.pg.h-320){v.pg.h+=700;sizeView(v);redrawBase(v);liveRender(v)}}
 
 /* ---------- ukazatel ---------- */
@@ -1530,8 +1597,13 @@ function onDown(e,v){if(!ED)return;
   e.preventDefault();try{v.live.setPointerCapture(e.pointerId)}catch(x){}
   const [x,y]=toLogical(e,v);const pr=e.pointerType==='pen'?(e.pressure||.5):.5;const t=ED.tool;
   if(t!=='text')commitText();
-  if(t==='pen'||t==='hl'){if(ED.sel)clearSel();
-    drag={mode:'draw',v,pid:e.pointerId,stroke:{id:uid(),type:'stroke',tool:t,color:t==='hl'?ED.hl:ED.color,w:t==='hl'?HL_W[ED.hwi]:PEN_W[ED.wi],pts:[[x,y,pr]]},shape:null,lx:x,ly:y};armHold();liveRender(v)}
+  {const mk=WATCH&&WATCH.marks.find(m=>m.pg===v.pg.id&&Math.hypot(x-(W-30),y-(m.y+m.h/2))<20);if(mk){watchOpen(v,mk);return}}
+  if(['pen','hl','shape','fill','text'].includes(t)){const bl=layerBlocked();if(bl){toast(bl,3000);return}}
+  if(t==='shape'){if(ED.sel)clearSel();drag={mode:'draw',v,pid:e.pointerId,tool:'shape',stroke:{color:ED.color,w:PEN_W[ED.wi]},shape:shapeAt(ED.shape,x,y,x,y),sx:x,sy:y};liveRender(v);return}
+  if(t==='fill'){fillAt(v,x,y);return}
+  if(t==='picker'){pickAt(v,x,y);return}
+  if(t==='pen'||t==='hl'){if(ED.sel)clearSel();const sn=RUL&&RUL.on&&rulerSnap(e);
+    drag={mode:'draw',v,pid:e.pointerId,snap:sn||null,stroke:Object.assign({id:uid(),type:'stroke',tool:t,color:t==='hl'?ED.hl:ED.color,w:t==='hl'?HL_W[ED.hwi]:PEN_W[ED.wi],pts:[[x,y,pr]]},t==='pen'&&ED.brush!=='pen'?{brush:ED.brush}:{},t==='pen'&&ED.op<1?{op:ED.op}:{}),shape:null,lx:x,ly:y};if(drag.snap){const q=toLogical(snapEv(e,drag.snap),v);drag.stroke.pts[0][0]=q[0];drag.stroke.pts[0][1]=q[1];drag.lx=q[0];drag.ly=q[1]}armHold();liveRender(v)}
   else if(t==='eraser'){pushHistory(v.pg);drag={mode:'erase',v,pid:e.pointerId,x,y,removed:0};eraseAt(v,x,y)}
   else if(t==='lasso'){const sel=ED.sel,hp=sel&&selParts().find(p=>p.v===v&&inRect(x,y,p.bbox,10));if(hp){hideSelMenu();const multi=!!sel.multi;drag={mode:'move',v,tv:v,multi,pid:e.pointerId,sx:x,sy:y,dx:0,dy:0,cx:e.clientX,cy:e.clientY};selParts().forEach(p=>{redrawBase(p.v,new Set(p.ids));liveRender(p.v)});if(!moveAutoScroll.on){moveAutoScroll.on=true;requestAnimationFrame(moveAutoScroll)}}
     else{clearSel();drag={mode:'lasso',v,pid:e.pointerId,pts:[[x,y]],cx:e.clientX,cy:e.clientY};if(!moveAutoScroll.on){moveAutoScroll.on=true;requestAnimationFrame(moveAutoScroll)}}}
@@ -1543,8 +1615,8 @@ function onMove(e,v){if(!drag||drag.v!==v)return;
     if(touches.size>=2){if(!drag.pinch)drag.pinch={d:touchDist(),z:ED.zoom};const z=drag.pinch.z*touchDist()/Math.max(20,drag.pinch.d);if(Math.abs(z/ED.zoom-1)>.06&&!drag.pz){drag.pz=true;requestAnimationFrame(()=>{if(drag)drag.pz=false;setZoom(z)})}}return}
   if(e.pointerId!==drag.pid)return;
   const evs=e.getCoalescedEvents?e.getCoalescedEvents():[e];
-  for(const ev of (evs.length?evs:[e])){const [x,y]=toLogical(ev,v);
-    if(drag.mode==='draw'){if(drag.shape){if(drag.shape.kind==='line'){drag.shape.x2=x;drag.shape.y2=y}continue}
+  for(const ev of (evs.length?evs:[e])){const [x,y]=toLogical(drag.snap?snapEv(ev,drag.snap):ev,v);
+    if(drag.mode==='draw'){if(drag.shape){if(drag.tool==='shape')drag.shape=shapeAt(ED.shape,drag.sx,drag.sy,x,y,ev.shiftKey);else if(drag.shape.kind==='line'){drag.shape.x2=x;drag.shape.y2=y}continue}
       const p=drag.stroke.pts,l=p[p.length-1];if(Math.hypot(x-l[0],y-l[1])<.7)continue;p.push([x,y,ev.pointerType==='pen'?(ev.pressure||.5):.5]);
       if(Math.hypot(x-drag.lx,y-drag.ly)>3){drag.lx=x;drag.ly=y;armHold()}}
     else if(drag.mode==='erase'){drag.x=x;drag.y=y;eraseAt(v,x,y)}
@@ -1557,7 +1629,7 @@ function onUp(e,v,cancel){if(e.pointerType==='touch')touches.delete(e.pointerId)
   if(!drag||drag.v!==v)return;if(drag.mode==='pan'){if(touches.size===0)drag=null;return}
   if(drag.pinchSel){if(touches.size<2){const d=drag;drag=null;if(Math.abs(d.k-1)>.01&&ED.sel){pushHistory(v.pg);ED.sel.objs.forEach(o=>scaleObj(o,d.ox,d.oy,d.k));ED.sel.bbox=unionBB(ED.sel.objs);changed(v)}else redrawBase(v);liveRender(v);showSelMenu()}return}
   if(e.pointerId!==drag.pid)return;clearTimeout(holdT);const d=drag;drag=null;
-  if(d.mode==='draw'){if(!cancel){pushHistory(v.pg);const o=d.shape?Object.assign({id:uid(),type:'shape',color:d.stroke.color,w:d.stroke.w},d.shape):d.stroke;stampRec(o);v.pg.objs.push(o);changed(v);ED.strokes=(ED.strokes||0)+1;if(ED.strokes%30===0){const x=XP(),k='w'+dayKey(Date.now());x.stat[k]=x.stat[k]||0;if(x.stat[k]<30){x.stat[k]+=5;addXP(5,L('psaní','writing'))}dayStat('write')}}else liveRender(v)}
+  if(d.mode==='draw'){const o=d.shape?shapeObj(d):d.stroke;if(!o){liveRender(v);return}if(!cancel){pushHistory(v.pg);stampRec(o);v.pg.objs.push(o);changed(v);watchSchedule(v,o);ED.strokes=(ED.strokes||0)+1;if(ED.strokes%30===0){const x=XP(),k='w'+dayKey(Date.now());x.stat[k]=x.stat[k]||0;if(x.stat[k]<30){x.stat[k]+=5;addXP(5,L('psaní','writing'))}dayStat('write')}}else liveRender(v)}
   else if(d.mode==='erase'){if(!d.removed){ED.hist.pop();updateUndo()}else touch(ED.nb);liveRender(v)}
   else if(d.mode==='lasso'){finishLasso(v,d.pts)}
   else if(d.mode==='move'&&d.multi){const ps=selParts();if(!cancel&&Math.abs(d.dx)+Math.abs(d.dy)>1){pushHistoryMulti(ps.map(p=>p.v.pg));ps.forEach(p=>{p.objs.forEach(o=>translate(o,d.dx,d.dy));changed(p.v)});refreshSel()}else ps.forEach(p=>redrawBase(p.v));ps.forEach(p=>liveRender(p.v));showSelMenu()}
@@ -1566,10 +1638,103 @@ function onUp(e,v,cancel){if(e.pointerType==='touch')touches.delete(e.pointerId)
       changed(v);changed(tv);liveRender(v);setSel(tv,objs);toast(L(`Přesunuto na stránku ${ED.views.indexOf(tv)+1}`,`Moved to page ${ED.views.indexOf(tv)+1}`))}
     else{if(!cancel&&Math.abs(d.dx)+Math.abs(d.dy)>1){pushHistory(v.pg);ED.sel.objs.forEach(o=>translate(o,d.dx,d.dy));ED.sel.bbox=unionBB(ED.sel.objs);changed(v)}else redrawBase(v);if(tv!==v)liveRender(tv);liveRender(v);showSelMenu()}}
   else if(d.mode==='ai'){finishAI(v,d.pts)}}
+/* tvary a kružítko */
+function shapeAt(kind,x0,y0,x,y,even){const dx=x-x0,dy=y-y0;
+  if(kind==='line'||kind==='arrow'){let x2=x,y2=y;if(even){const a=Math.round(Math.atan2(dy,dx)/(Math.PI/12))*(Math.PI/12),r=Math.hypot(dx,dy);x2=x0+r*Math.cos(a);y2=y0+r*Math.sin(a)}return {kind:'line',arrow:kind==='arrow',x1:x0,y1:y0,x2,y2}}
+  if(kind==='rect'){let rw=dx,rh=dy;if(even){const m=Math.max(Math.abs(dx),Math.abs(dy));rw=Math.sign(dx||1)*m;rh=Math.sign(dy||1)*m}return {kind:'rect',x:x0,y:y0,rw,rh}}
+  if(kind==='circle'){const r=Math.hypot(dx,dy);return {kind:'ellipse',cx:x0,cy:y0,rx:r,ry:r,compass:true}}
+  if(kind==='tri')return {kind:'tri',x0,y0,x1:x,y1:y};
+  let rx=Math.abs(dx)/2,ry=Math.abs(dy)/2;if(even)rx=ry=Math.max(rx,ry);return {kind:'ellipse',cx:x0+dx/2,cy:y0+dy/2,rx,ry}}
+function shapeObj(d){const sh=d.shape,base={id:uid(),color:d.stroke.color,w:d.stroke.w};if(ED.op<1&&d.tool==='shape')base.op=ED.op;
+  if(sh.kind==='tri'){const {x0,y0,x1,y1}=sh;if(Math.abs(x1-x0)<4&&Math.abs(y1-y0)<4)return null;const top=[(x0+x1)/2,Math.min(y0,y1)],bl=[Math.min(x0,x1),Math.max(y0,y1)],br=[Math.max(x0,x1),Math.max(y0,y1)];
+    return Object.assign(base,{type:'stroke',tool:'pen',brush:'fine',straight:1,pts:[top,bl,br,top].map(q=>[q[0],q[1],.5])})}
+  const b=bboxOf(Object.assign({type:'shape',w:base.w},sh));if(d.tool==='shape'&&b.w<4&&b.h<4)return null;return Object.assign(base,{type:'shape'},sh)}
+/* kbelík: vyplní uzavřený obrys (počítá se z toho, co je na stránce nakreslené) */
+function fillAt(v,x,y){const nb=ED.nb,pg=v.pg,k=Math.min(1.25,Math.sqrt(12e6/(W*pg.h))),Wd=Math.round(W*k),Hd=Math.round(pg.h*k);
+  const hideFills=new Set(pg.objs.filter(o=>o.fillOf).map(o=>o.id));const cv=document.createElement('canvas');cv.width=Wd;cv.height=Hd;const c=cv.getContext('2d');c.scale(k,k);
+  renderPage(c,nb,pg,{noPaper:true,ink:'#000',hide:hideFills});const id=c.getImageData(0,0,Wd,Hd).data;const wall=i=>id[i*4+3]>70;
+  const sx=Math.round(x*k),sy=Math.round(y*k);if(sx<0||sy<0||sx>=Wd||sy>=Hd)return;if(wall(sy*Wd+sx)){toast(L('Ťukni dovnitř obrysu, ne na čáru.','Tap inside the outline, not on the line.'));return}
+  const mask=new Uint8Array(Wd*Hd),st=[sx,sy];let n=0,x0=sx,x1=sx,y0=sy,y1=sy;
+  while(st.length){const py=st.pop(),px=st.pop();const row=py*Wd;if(mask[row+px]||wall(row+px))continue;let l=px,r=px;
+    while(l>0&&!mask[row+l-1]&&!wall(row+l-1))l--;while(r<Wd-1&&!mask[row+r+1]&&!wall(row+r+1))r++;
+    for(let i=l;i<=r;i++)mask[row+i]=1;n+=r-l+1;if(l<x0)x0=l;if(r>x1)x1=r;if(py<y0)y0=py;if(py>y1)y1=py;
+    for(const ny of [py-1,py+1]){if(ny<0||ny>=Hd)continue;const nr=ny*Wd;let run=false;for(let i=l;i<=r;i++){const ok=!mask[nr+i]&&!wall(nr+i);if(ok&&!run){st.push(i,ny);run=true}else if(!ok)run=false}}}
+  const pad=2;x0=Math.max(0,x0-pad);y0=Math.max(0,y0-pad);x1=Math.min(Wd-1,x1+pad);y1=Math.min(Hd-1,y1+pad);const bw=x1-x0+1,bh=y1-y0+1;
+  const out=document.createElement('canvas');out.width=bw;out.height=bh;const oc=out.getContext('2d');const img=oc.createImageData(bw,bh);
+  const ink=inkOf(ED.color,nb),col=hexRgb(ink),al=Math.round(255*(ED.op||1));
+  for(let yy=0;yy<bh;yy++)for(let xx=0;xx<bw;xx++){const gx=xx+x0,gy=yy+y0;let on=mask[gy*Wd+gx];
+    if(!on)for(let a=-pad;a<=pad&&!on;a++)for(let b2=-pad;b2<=pad&&!on;b2++){const qx=gx+a,qy=gy+b2;if(qx>=0&&qy>=0&&qx<Wd&&qy<Hd&&mask[qy*Wd+qx])on=1}
+    if(on){const i=(yy*bw+xx)*4;img.data[i]=col[0];img.data[i+1]=col[1];img.data[i+2]=col[2];img.data[i+3]=al}}
+  oc.putImageData(img,0,0);const src=out.toDataURL('image/png');imgCache.set(src,out);pushHistory(pg);
+  const o={id:uid(),type:'image',fillOf:1,x:x0/k,y:y0/k,w:bw/k,h:bh/k,src};if(nb.layers&&nb.layers.length>1)o.ly=ED.layer;pg.objs.unshift(o);changed(v);
+  if(n>Wd*Hd*.55)toast(L('Obrys nebyl uzavřený, vyplnila se skoro celá stránka. Vrátíš to šipkou zpět.','The outline was not closed, so most of the page got filled. Undo with the back arrow.'),4500)}
+function hexRgb(c){const cv=document.createElement('canvas');cv.width=cv.height=1;const x=cv.getContext('2d');x.fillStyle=c;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return [d[0],d[1],d[2]]}
+/* kapátko */
+function pickAt(v,x,y){const cv=document.createElement('canvas');cv.width=cv.height=3;const c=cv.getContext('2d');c.translate(1-x,1-y);renderPage(c,ED.nb,v.pg,{});const d=c.getImageData(1,1,1,1).data;
+  const hex='#'+[d[0],d[1],d[2]].map(n=>n.toString(16).padStart(2,'0')).join('');ED.color=hex;S.prefs.lastColor=hex;if(!S.prefs.palette.includes(hex)){S.prefs.palette.push(hex);if(S.prefs.palette.length>10)S.prefs.palette.splice(1,1)}save();
+  ED.tool=ED.prevTool||'pen';renderTools();toast(L('Barva vybrána','Colour picked')+' '+hex)}
+/* pravítko: posuneš tažením, otočíš kolečkem myši, úchytem nebo dvěma prsty; pero podél hrany kreslí rovně */
+var RUL={on:false,cx:0,cy:0,a:0,len:680,h:64,el:null,pts:new Map()};
+function toggleRuler(){RUL.on=!RUL.on;const el=rulerEl();if(RUL.on){const r=$('#scroller').getBoundingClientRect();RUL.cx=r.left+r.width/2;RUL.cy=r.top+r.height*.45;RUL.a=0;placeRuler();el.hidden=false}else el.hidden=true;renderTools()}
+function rulerEl(){if(RUL.el)return RUL.el;const el=document.createElement('div');el.id='ruler';el.hidden=true;el.innerHTML=`<canvas width="${RUL.len*2}" height="${RUL.h*2}"></canvas><span class="ang"></span><button type="button" class="rrot" aria-label="${L('Otočit','Rotate')}">⟳</button><button type="button" class="rclose" aria-label="${L('Schovat pravítko','Hide ruler')}">✕</button>`;
+  $('#ed').appendChild(el);RUL.el=el;const cv=el.querySelector('canvas'),c=cv.getContext('2d');c.scale(2,2);c.strokeStyle='#33413d';c.fillStyle='#33413d';c.font='10px system-ui';c.lineWidth=1;
+  for(let i=0,n=0;i<=RUL.len-20;i+=10,n++){const L1=n%10===0?16:n%5===0?11:6;c.beginPath();c.moveTo(10+i+.5,0);c.lineTo(10+i+.5,L1);c.moveTo(10+i+.5,RUL.h);c.lineTo(10+i+.5,RUL.h-L1);c.stroke();if(n%10===0&&n)c.fillText(String(n/10),10+i-3,28)}
+  let mode=null,st=null;
+  el.addEventListener('pointerdown',e=>{e.stopPropagation();if(e.target.closest('.rclose')){toggleRuler();return}el.setPointerCapture(e.pointerId);RUL.pts.set(e.pointerId,[e.clientX,e.clientY]);
+    mode=e.target.closest('.rrot')?'rot':RUL.pts.size>=2?'two':'move';st={cx:RUL.cx,cy:RUL.cy,a:RUL.a,x:e.clientX,y:e.clientY,pts:new Map(RUL.pts)}});
+  el.addEventListener('pointermove',e=>{if(!RUL.pts.has(e.pointerId)||!st)return;RUL.pts.set(e.pointerId,[e.clientX,e.clientY]);
+    if(mode==='rot'){RUL.a=snapA(Math.atan2(e.clientY-RUL.cy,e.clientX-RUL.cx)-Math.atan2(st.y-st.cy,st.x-st.cx)+st.a)}
+    else if(RUL.pts.size>=2){const [p,q]=[...RUL.pts.values()],[p0,q0]=[...st.pts.values()];if(p0&&q0){RUL.a=snapA(st.a+Math.atan2(q[1]-p[1],q[0]-p[0])-Math.atan2(q0[1]-p0[1],q0[0]-p0[0]));RUL.cx=st.cx+(p[0]+q[0]-p0[0]-q0[0])/2;RUL.cy=st.cy+(p[1]+q[1]-p0[1]-q0[1])/2}}
+    else{RUL.cx=st.cx+e.clientX-st.x;RUL.cy=st.cy+e.clientY-st.y}placeRuler()});
+  const up=e=>{RUL.pts.delete(e.pointerId);st=RUL.pts.size?{cx:RUL.cx,cy:RUL.cy,a:RUL.a,x:[...RUL.pts.values()][0][0],y:[...RUL.pts.values()][0][1],pts:new Map(RUL.pts)}:null;mode=RUL.pts.size?'move':null};
+  el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up);
+  el.addEventListener('wheel',e=>{e.preventDefault();RUL.a+=(e.deltaY>0?1:-1)*(e.shiftKey?Math.PI/12:Math.PI/180);placeRuler()},{passive:false});return el}
+function snapA(a){const d=a*180/Math.PI,r=Math.round(d/45)*45;return Math.abs(d-r)<2.5?r*Math.PI/180:a}
+function placeRuler(){const el=rulerEl();el.style.transform=`translate(${RUL.cx-RUL.len/2}px,${RUL.cy-RUL.h/2}px) rotate(${RUL.a}rad)`;let d=Math.round(RUL.a*180/Math.PI)%360;if(d<0)d+=360;el.querySelector('.ang').textContent=d+'°'}
+function rulerSnap(e){const nx=-Math.sin(RUL.a),ny=Math.cos(RUL.a),ux=Math.cos(RUL.a),uy=Math.sin(RUL.a);const px=e.clientX-RUL.cx,py=e.clientY-RUL.cy;const s=px*nx+py*ny,t=px*ux+py*uy;
+  if(Math.abs(t)>RUL.len/2+20)return null;const half=RUL.h/2;if(Math.abs(s)<half-4||Math.abs(s)>half+34)return null;return {side:Math.sign(s)*half,nx,ny}}
+function snapEv(ev,sn){const s=(ev.clientX-RUL.cx)*sn.nx+(ev.clientY-RUL.cy)*sn.ny,k=s-sn.side;return {clientX:ev.clientX-sn.nx*k,clientY:ev.clientY-sn.ny*k,pointerType:ev.pointerType,pressure:ev.pressure}}
+/* vrstvy */
+function layersPop(anchor){const nb=ED.nb;const draw=()=>{const LY=nb.layers||[{name:L('Vrstva 1','Layer 1')}];
+    return `<div class="pop-sec" style="min-width:270px"><span class="eyebrow">${L('Vrstvy','Layers')} · ${L('nahoře je ta nejvyšší','top is frontmost')}</span>${LY.map((ly,i)=>i).reverse().map(i=>{const ly=LY[i];return `<div class="lyrow ${(nb.layers?ED.layer:0)===i?'on':''}"><button type="button" data-ly="sel:${i}" class="lyname">${esc(ly.name)}</button>${nb.layers?`<button type="button" data-ly="vis:${i}" title="${L('Skrýt / zobrazit','Hide / show')}">${ly.hidden?'🙈':'👁'}</button><button type="button" data-ly="lock:${i}" title="${L('Zamknout','Lock')}">${ly.locked?'🔒':'🔓'}</button><button type="button" data-ly="up:${i}" ${i===LY.length-1?'disabled':''}>↑</button><button type="button" data-ly="down:${i}" ${i===0?'disabled':''}>↓</button><button type="button" data-ly="del:${i}" title="${L('Smazat vrstvu i s obsahem','Delete layer and its content')}">🗑</button>`:''}</div>`}).join('')}
+      <button type="button" class="btn" data-ly="add" style="margin-top:6px">+ ${L('Nová vrstva','New layer')}</button></div>`};
+  const p=openPop(anchor,[],()=>{},draw());let armed=-1;
+  p.addEventListener('click',e=>{const b=e.target.closest('[data-ly]');if(!b)return;const [k,si]=b.dataset.ly.split(':'),i=+si;
+    if(k==='add'){if(!nb.layers){nb.layers=[{id:uid(),name:L('Vrstva 1','Layer 1')}];nb.pages.forEach(pg=>pg.objs.forEach(o=>{if(o.ly==null)o.ly=0}))}nb.layers.push({id:uid(),name:L('Vrstva ','Layer ')+(nb.layers.length+1)});ED.layer=nb.layers.length-1}
+    else if(!nb.layers)return;
+    else if(k==='sel')ED.layer=i;else if(k==='vis')nb.layers[i].hidden=!nb.layers[i].hidden;else if(k==='lock')nb.layers[i].locked=!nb.layers[i].locked;
+    else if(k==='up'||k==='down'){const j=k==='up'?i+1:i-1;if(j<0||j>=nb.layers.length)return;[nb.layers[i],nb.layers[j]]=[nb.layers[j],nb.layers[i]];nb.pages.forEach(pg=>pg.objs.forEach(o=>{const l=o.ly||0;if(l===i)o.ly=j;else if(l===j)o.ly=i;pg.rev=(pg.rev||0)+1}));if(ED.layer===i)ED.layer=j;else if(ED.layer===j)ED.layer=i}
+    else if(k==='del'){if(nb.layers.length<2)return;if(armed!==i){armed=i;b.textContent='✓?';toast(L('Ťukni znovu pro smazání vrstvy i s obsahem.','Tap again to delete the layer and its content.'));return}
+      nb.pages.forEach(pg=>{pg.objs=pg.objs.filter(o=>(o.ly||0)!==i);pg.objs.forEach(o=>{if((o.ly||0)>i)o.ly=(o.ly||0)-1});pg.rev=(pg.rev||0)+1});nb.layers.splice(i,1);ED.layer=Math.min(ED.layer,nb.layers.length-1);if(nb.layers.length<2){delete nb.layers;ED.layer=0}}
+    armed=-1;touch(nb);ED.views.forEach(v=>{redrawBase(v);liveRender(v)});clearSel();renderTools();p.innerHTML=draw()})}
+/* hlídání chyb při psaní: po pauze AI mrkne na nový zápis; při jasné chybě dá na okraj červenou tečku */
+var WATCH={t:0,last:0,since:new Map(),busy:false,marks:[]};
+function watchSchedule(v,o){if(S.prefs.watch===false||!ED||o.tool==='hl')return;const b=bboxOf(o);
+  WATCH.marks=WATCH.marks.filter(m=>!(m.pg===v.pg.id&&b.x<m.x+m.w+30&&b.x+b.w>m.x-30&&b.y<m.y+m.h+30&&b.y+b.h>m.y-30));
+  const r=WATCH.since.get(v.pg.id)||{y:1e9,y2:-1e9,n:0};r.y=Math.min(r.y,b.y);r.y2=Math.max(r.y2,b.y+b.h);r.n++;WATCH.since.set(v.pg.id,r);clearTimeout(WATCH.t);WATCH.t=setTimeout(()=>watchRun(v),4500)}
+async function watchRun(v){if(!ED||WATCH.busy)return;if(drag){WATCH.t=setTimeout(()=>watchRun(v),3000);return}const r=WATCH.since.get(v.pg.id);if(!r||r.n<6)return;
+  const wait=40000-(Date.now()-WATCH.last);if(wait>0){WATCH.t=setTimeout(()=>watchRun(v),wait);return}const sample=await SAMPLE_P;if(!sample)return;
+  WATCH.since.delete(v.pg.id);WATCH.last=Date.now();WATCH.busy=true;const nbAt=ED.nb;
+  try{const y0=Math.max(0,r.y-160),y1=Math.min(v.pg.h,r.y2+50),reg={x:0,y:y0,w:W,h:y1-y0};if(reg.h<40)return;
+    const k=1.2,cv=document.createElement('canvas');cv.width=Math.round(reg.w*k);cv.height=Math.round(reg.h*k);const c=cv.getContext('2d');c.fillStyle='#fff';c.fillRect(0,0,cv.width,cv.height);c.scale(k,k);c.translate(-reg.x,-reg.y);renderPage(c,nbAt,v.pg,{noPaper:true,ink:'#111'});
+    const blob=await new Promise(res=>cv.toBlob(res,'image/jpeg',.85));
+    const res=await sample.json(`${TEACHER()}
+${profileCtx(nbAt)}
+Na obrázku je kus stránky, kterou student právě píše rukou (dole je nejnovější). Zkontroluj JEN jasné věcné chyby: chybu ve výpočtu, špatně použitý vzorec, chybný krok úpravy nebo faktický omyl. Neřeš úpravu, rukopis, pravopis, nedokončený příklad ani styl. Když si nejsi jistý, chyba to není.
+Odpověz jen JSON: {"ok":true} nebo {"ok":false,"box":[x1,y1,x2,y2],"hint":"krátká nápověda (max 12 slov), bez řešení, v jazyce zápisu"} – box je místo chyby v procentech šířky a výšky obrázku.`,{images:[blob],modelTier:'quick',purpose:'watch'});
+    if(!ED||ED.nb!==nbAt||!res||res.ok!==false||!Array.isArray(res.box)||res.box.length<4)return;const [a,b2,c2,d]=res.box.map(Number).map(n=>clamp(n||0,0,100));
+    const m={pg:v.pg.id,x:reg.x+Math.min(a,c2)/100*reg.w,y:reg.y+Math.min(b2,d)/100*reg.h,w:Math.max(14,Math.abs(c2-a)/100*reg.w),h:Math.max(14,Math.abs(d-b2)/100*reg.h),hint:String(res.hint||'').slice(0,160)};
+    WATCH.marks=WATCH.marks.filter(x=>x.pg!==m.pg||Math.abs(x.y-m.y)>40);WATCH.marks.push(m);liveRender(v)}
+  catch(e){}finally{WATCH.busy=false}}
+function watchOpen(v,mk){closeRemBanner();const el=document.createElement('div');el.className='rem-banner';el.id='remBanner';el.setAttribute('role','status');
+  el.innerHTML=`<span class="ic" style="background:#e03131;color:#fff">!</span><span class="tx"><b>${L('Možná chyba','Possible mistake')}</b><small>${esc(mk.hint||L('Zkontroluj tenhle krok.','Check this step.'))}</small></span><span class="acts"><button type="button" class="btn" data-wx>${L('Není to chyba','Not a mistake')}</button><button type="button" class="btn primary" data-wh>${L('Pomoz mi','Help me')}</button></span>`;
+  el.addEventListener('click',e=>{const drop=()=>{WATCH.marks=WATCH.marks.filter(x=>x!==mk);liveRender(v);closeRemBanner()};
+    if(e.target.closest('[data-wx]'))drop();else if(e.target.closest('[data-wh]')){drop();const pad=24;openAI(v,{x:Math.max(0,mk.x-pad*4),y:Math.max(0,mk.y-pad*2),w:Math.min(W,mk.w+pad*8),h:mk.h+pad*4},null)}});
+  document.body.appendChild(el)}
 function armHold(){clearTimeout(holdT);if(!S.prefs.snap)return;holdT=setTimeout(()=>{if(!drag||drag.mode!=='draw'||drag.shape)return;const p=drag.stroke.pts;if(p.length<4||pathLen(p)<36)return;
   drag.shape=recognize(p);if(navigator.vibrate)try{navigator.vibrate(8)}catch(x){}liveRender(drag.v)},480)}
 function eraseAt(v,x,y){const r=12;let n=0;
-  if(S.prefs.eraser==='part'){const out=[];for(const o of v.pg.objs){
+  if(S.prefs.eraser==='part'){const out=[];for(const o of v.pg.objs){if(!onLayer(o)){out.push(o);continue}
       if(o.type==='stroke'&&hit(o,x,y,r)){n++;let run=[];const runs=[];for(const p of o.pts){if(Math.hypot(p[0]-x,p[1]-y)<r+o.w/2){if(run.length)runs.push(run);run=[]}else run.push(p)}if(run.length)runs.push(run);
         runs.forEach(rp=>{if(rp.length>1)out.push(Object.assign({},o,{id:uid(),pts:rp}))});continue}
       if((o.type==='text'||o.type==='shape')&&hit(o,x,y,r)){n++;continue}out.push(o)}
@@ -1579,13 +1744,13 @@ function eraseAt(v,x,y){const r=12;let n=0;
 
 /* ---------- výběr ---------- */
 let selMenu=null;
-function lassoPick(v,pts){return v.pg.objs.filter(o=>{if(o.locked)return false;if(o.type==='stroke'){let n=0;const st=Math.max(1,Math.floor(o.pts.length/24));let tot=0;for(let i=0;i<o.pts.length;i+=st){tot++;if(inPoly(o.pts[i][0],o.pts[i][1],pts))n++}return n/tot>=.5}const b=bboxOf(o);return inPoly(b.x+b.w/2,b.y+b.h/2,pts)})}
+function lassoPick(v,pts){return v.pg.objs.filter(o=>{if(o.locked||!onLayer(o))return false;if(o.type==='stroke'){let n=0;const st=Math.max(1,Math.floor(o.pts.length/24));let tot=0;for(let i=0;i<o.pts.length;i+=st){tot++;if(inPoly(o.pts[i][0],o.pts[i][1],pts))n++}return n/tot>=.5}const b=bboxOf(o);return inPoly(b.x+b.w/2,b.y+b.h/2,pts)})}
 function finishLasso(v,pts){ED.views.forEach(x=>{if(x.lassoShown){x.lassoShown=false;liveRender(x)}});
   if(pts.length>=5&&pathLen(pts)>=30){let lo=1e9,hi=-1e9;for(const p of pts){lo=Math.min(lo,p[1]);hi=Math.max(hi,p[1])}
     if(lo<-10||hi>v.pg.h+10){const parts=[];for(const tv of ED.views){const off=tv===v?0:pageOff(v,tv);if(hi<off||lo>off+tv.pg.h)continue;const tp=off?pts.map(p=>[p[0],p[1]-off]):pts;const objs=lassoPick(tv,tp);if(objs.length)parts.push({v:tv,objs})}
       if(parts.length){setSelParts(parts);if(parts.length>1)toast(L(`Vybráno ${selCount()} objektů na ${parts.length} stránkách`,`Selected ${selCount()} objects on ${parts.length} pages`));}else liveRender(v);return}}
   if(pts.length<5||pathLen(pts)<30){const [x,y]=pts[0];const o=[...v.pg.objs].reverse().find(q=>hit(q,x,y,8));if(o)setSel(v,[o]);else liveRender(v);return}
-  const objs=v.pg.objs.filter(o=>{if(o.locked)return false;if(o.type==='stroke'){let n=0;const st=Math.max(1,Math.floor(o.pts.length/24));let tot=0;for(let i=0;i<o.pts.length;i+=st){tot++;if(inPoly(o.pts[i][0],o.pts[i][1],pts))n++}return n/tot>=.5}
+  const objs=v.pg.objs.filter(o=>{if(o.locked||!onLayer(o))return false;if(o.type==='stroke'){let n=0;const st=Math.max(1,Math.floor(o.pts.length/24));let tot=0;for(let i=0;i<o.pts.length;i+=st){tot++;if(inPoly(o.pts[i][0],o.pts[i][1],pts))n++}return n/tot>=.5}
     const b=bboxOf(o);return inPoly(b.x+b.w/2,b.y+b.h/2,pts)});
   if(objs.length)setSel(v,objs);else liveRender(v)}
 function setSel(v,objs){setSelParts([{v,objs}])}
@@ -2460,6 +2625,19 @@ function agAdd(o,src){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(o.date||''
   const a={id:uid(),title,kind,date,time,nbId:nb?nb.id:null,done:false,created:Date.now(),src:src||'chat'};
   if(kind==='test'&&nb&&!S.review.exams.some(e=>e.nbId===nb.id&&dayStart(e.date)===date)){const ex={id:uid(),nbId:nb.id,date:date+8*3600e3};S.review.exams.push(ex);a.examId=ex.id}
   a.upd=Date.now();if(AG().some(x=>x.date===date&&x.kind===kind&&nb&&x.nbId===nb.id))return null;AGRAW().push(a);save();renderToday();return a}
+/* plán přípravy na test: každý den krátký úkol až do dne testu (s AI podle zápisků, jinak obecný) */
+async function studyPlan(a){const nb=S.notebooks.find(n=>n.id===a.nbId),days=agDays(a);if(days<1){toast(L('Test je dnes – zkus rychlý procvičovací test.','The test is today – try a quick practice test.'));return 0}
+  const n=Math.min(days,14);let plan=null;const sample=await SAMPLE_P;
+  if(sample&&usageLeft()>0){try{const r=await sample.json(`${TEACHER()}
+${profileCtx(nb||null)}
+Student má ${agDate(a)} termín „${a.title}“ (${L(AGK[a.kind].cs,AGK[a.kind].en)}). Zbývá ${days} dní. Sestav plán přípravy na ${n} ${n===1?'den':'dní'} (od dneška do dne před termínem). Každý den 20–45 minut, rozděl látku na menší části, na konci opakování a zkušební test, poslední den jen lehké shrnutí a spánek. Vycházej z jeho zápisků. Úkoly piš konkrétně (co zopakovat, co procvičit), krátce.
+Odpověz jen JSON: {"days":[{"title":"úkol na ten den, max 70 znaků","minutes":30}]} – přesně ${n} položek, v pořadí od dneška.
+${nb?'ZÁPISKY:\n'+knowledge(new Set([nb.id])).slice(0,60000):''}`,{modelTier:'default'});if(r&&Array.isArray(r.days))plan=r.days.filter(d=>d&&d.title).slice(0,n);spendUsage()}catch(e){}}
+  if(!plan||!plan.length){const T=[[L('Projdi zápisky a označ si, čemu nerozumíš','Go through your notes and mark what you don\'t get'),30],[L('Vysvětli si nejasná místa s pomocníkem','Clear up the unclear parts with the helper'),30],[L('Procvič příklady z každého tématu','Practise problems from each topic'),40],[L('Zopakuj kartičky a vzorce','Review flashcards and formulas'),25],[L('Zkušební test v appce','Practice test in the app'),35],[L('Oprav si chyby ze zkušebního testu','Fix the mistakes from the practice test'),30],[L('Lehké shrnutí a dobře se vyspi','Light recap and a good night\'s sleep'),20]];
+    plan=[];for(let i=0;i<n;i++){const k=n===1?6:Math.min(T.length-1,Math.round(i*(T.length-1)/(n-1)));plan.push({title:T[k][0],minutes:T[k][1]})}}
+  AGRAW().forEach(x=>{if(x.study===a.id&&!x.done){x.del=true;x.upd=Date.now()}});const today=dayStart(Date.now());let added=0;
+  const t0=new Date(today);plan.forEach((d,i)=>{const date=new Date(t0.getFullYear(),t0.getMonth(),t0.getDate()+i).getTime();if(date>=dayStart(a.date))return;AGRAW().push({id:uid(),title:'📚 '+String(d.title).slice(0,80),kind:'task',date,time:'',nbId:a.nbId||null,done:false,created:Date.now(),src:'plan',study:a.id,min:+d.minutes||30,upd:Date.now()});added++});
+  save();renderToday();toast(L(`Plán hotový: ${added} ${added===1?'den':added<5?'dny':'dní'} přípravy. Každý den ti připomenu, co dělat.`,`Plan ready: ${added} day${added===1?'':'s'} of prep. I'll remind you each day.`),4500);return added}
 function agRemove(id){const a=AG().find(x=>x.id===id);if(!a)return;if(a.examId)S.review.exams=S.review.exams.filter(e=>e.id!==a.examId);a.del=true;a.upd=Date.now();save();renderToday()}
 function agUpcoming(){return AG().filter(a=>!a.done&&agWhen(a)>=dayStart(Date.now())-2*DAY).sort((a,b)=>agWhen(a)-agWhen(b))}
 function gcalLink(a){const ds=isoDay(a.date).replace(/-/g,'');let dates;if(a.time){const st=new Date(agWhen(a)),en=new Date(agWhen(a)+3600e3),f=x=>`${isoDay(x).replace(/-/g,'')}T${String(x.getHours()).padStart(2,'0')}${String(x.getMinutes()).padStart(2,'0')}00`;dates=f(st)+'/'+f(en)}else dates=ds+'/'+isoDay(a.date+DAY+3600e3).replace(/-/g,'');
@@ -2531,15 +2709,15 @@ function agHandle(text,q,img){LAST_ZAPIS=zapisFromText(text,img);if(LAST_ZAPIS.l
   if(tms.length&&!/\[\[KALENDAR/.test(text||''))return [];
   let added=agFromText(text||'');if(!added.length&&q){const o=agLocal(q);if(o){const a=agAdd(o,'local');if(a)added=[a]}}if(added.length)agConfirm(added);return added}
 function agConfirm(list){const a=list[0];const el=document.createElement('div');closeRemBanner();el.className='rem-banner';el.id='remBanner';el.setAttribute('role','status');
-  el.innerHTML=`<span class="ic">📅</span><span class="tx"><b>${L('Zapsáno do kalendáře','Added to your calendar')}: ${esc(a.title)}${list.length>1?` +${list.length-1}`:''}</b><small>${esc(agDate(a))} · ${esc(agRel(a))} · ${L('připomenu ti to den předem i v den termínu','I\'ll remind you the day before and on the day')}</small></span><span class="acts"><button type="button" class="btn" data-undo>${L('Zrušit','Undo')}</button><button type="button" class="btn primary" data-cal>${L('Kalendář','Calendar')}</button></span>`;
-  el.addEventListener('click',e=>{if(e.target.closest('[data-undo]')){list.forEach(x=>agRemove(x.id));closeRemBanner();toast(L('Odebráno z kalendáře','Removed from calendar'))}else if(e.target.closest('[data-cal]')){closeRemBanner();agendaDialog()}});
+  el.innerHTML=`<span class="ic">📅</span><span class="tx"><b>${L('Zapsáno do kalendáře','Added to your calendar')}: ${esc(a.title)}${list.length>1?` +${list.length-1}`:''}</b><small>${esc(agDate(a))} · ${esc(agRel(a))} · ${L('připomenu ti to den předem i v den termínu','I\'ll remind you the day before and on the day')}</small></span><span class="acts">${a.kind==='test'&&agDays(a)>0?`<button type="button" class="btn" data-plan>${L('Plán přípravy','Study plan')}</button>`:''}<button type="button" class="btn" data-undo>${L('Zrušit','Undo')}</button><button type="button" class="btn primary" data-cal>${L('Kalendář','Calendar')}</button></span>`;
+  el.addEventListener('click',e=>{const pb=e.target.closest('[data-plan]');if(pb){pb.disabled=true;pb.textContent='…';studyPlan(a).then(()=>closeRemBanner());return}if(e.target.closest('[data-undo]')){list.forEach(x=>agRemove(x.id));closeRemBanner();toast(L('Odebráno z kalendáře','Removed from calendar'))}else if(e.target.closest('[data-cal]')){closeRemBanner();agendaDialog()}});
   document.body.appendChild(el);clearTimeout(agConfirm.t);agConfirm.t=setTimeout(()=>{if(el.isConnected)el.remove()},12000)}
 function agendaDialog(){closeRemBanner();const m=openModal(`<div class="modal-h"><h2>${L('Kalendář','Calendar')}</h2><button class="iconbtn" type="button" data-x aria-label="Zavřít"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><div class="modal-b" id="agBody"></div>`,()=>renderLib());
   function draw(){const now=dayStart(Date.now());const list=AG().filter(a=>agWhen(a)>=now-3*DAY||!a.done).sort((a,b)=>agWhen(a)-agWhen(b));let h='',last='';
     h+=`<p class="fine" style="margin-top:0">${L('Termíny zapisuje pomocník sám, když mu v chatu napíšeš třeba „za 3 dny mám test z fyziky“. Připomene ti je den předem a v den termínu.','The helper adds deadlines by itself when you tell it something like “I have a physics test in 3 days”. You get a reminder the day before and on the day.')}</p>`;
     h+=list.length?'<div class="ag-list">'+list.map(a=>{const day=agDays(a)<0?L('Po termínu','Overdue'):agDate({date:a.date});const head=day!==last?`<div class="ag-day">${esc(day)}</div>`:'';last=day;
       return head+`<div class="ag-it ${a.done?'done':''}"><button type="button" class="chk" data-done="${a.id}" aria-label="${L('Hotovo','Done')}"></button><span class="k ${a.kind}">${AGK[a.kind].ic}</span><span class="tx"><b>${esc(a.title)}</b><small>${L(AGK[a.kind].cs,AGK[a.kind].en)} · ${esc(agRel(a))}${a.time?' · '+a.time:''}${a.nbId&&S.notebooks.find(n=>n.id===a.nbId)?' · '+esc(S.notebooks.find(n=>n.id===a.nbId).title):''}</small></span>
-        <span class="act">${a.kind==='test'&&a.nbId?`<button type="button" data-prep="${a.nbId}">${L('Připravit se','Prepare')}</button>`:''}<a href="${gcalLink(a)}" target="_blank" rel="noopener">${L('+ Google Kalendář','+ Google Calendar')}</a><button type="button" data-del="${a.id}" aria-label="${L('Smazat','Delete')}">✕</button></span></div>`}).join('')+'</div>'
+        <span class="act">${a.kind==='test'&&agDays(a)>0?`<button type="button" data-plan="${a.id}">${AG().some(x=>x.study===a.id)?L('Nový plán','New plan'):L('Plán přípravy','Study plan')}</button>`:''}${a.kind==='test'&&a.nbId?`<button type="button" data-prep="${a.nbId}">${L('Připravit se','Prepare')}</button>`:''}<a href="${gcalLink(a)}" target="_blank" rel="noopener">${L('+ Google Kalendář','+ Google Calendar')}</a><button type="button" data-del="${a.id}" aria-label="${L('Smazat','Delete')}">✕</button></span></div>`}).join('')+'</div>'
       :`<div class="promise"><b>${L('Zatím tu nic není.','Nothing here yet.')}</b>${L('Napiš pomocníkovi třeba „v pátek odevzdávám referát“ nebo termín přidej níž.','Tell the helper e.g. “my essay is due on Friday”, or add a date below.')}</div>`;
     h+=`<div class="group" style="margin-top:16px"><span class="eyebrow">${L('Přidat ručně','Add manually')}</span><div class="ag-add"><label class="fld">${L('Co','What')}<input id="agT" placeholder="${L('např. Úkol z angličtiny','e.g. English homework')}" autocomplete="off"></label><label class="fld">${L('Kdy','Date')}<input id="agD" type="date" value="${isoDay(Date.now()+DAY)}"></label><label class="fld">${L('Čas','Time')}<input id="agH" type="time"></label>
       <div class="row">${Object.keys(AGK).map(k=>`<button type="button" class="pill" data-kind="${k}" aria-pressed="${k===(draw.kind||'task')}">${L(AGK[k].cs,AGK[k].en)}</button>`).join('')}<button type="button" class="btn primary" data-add style="margin-left:auto">${L('Přidat','Add')}</button></div></div></div>
@@ -2549,8 +2727,9 @@ function agendaDialog(){closeRemBanner();const m=openModal(`<div class="modal-h"
   m.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const s=b.dataset;if('x' in s)return closeModal();
     if(s.done){const a=AG().find(x=>x.id===s.done);if(a){a.done=!a.done;a.upd=Date.now();if(a.done&&!a.xp){a.xp=1;xpStat('agdone');addXP(20,L('splněno','done'))}save()}return draw()}
     if(s.del){agRemove(s.del);return draw()}
+    if(s.plan){const a=AG().find(x=>x.id===s.plan);if(a){b.disabled=true;b.textContent='…';studyPlan(a).then(()=>{if(m.isConnected)draw()})}return}
     if(s.prep){closeModal();return learnHub(s.prep,'exams')}
-    if(s.kind){draw.kind=s.kind;return draw()}
+    if(s.kind){const keep=['agT','agD','agH'].map(id=>{const el=$('#'+id,m);return el?el.value:null});draw.kind=s.kind;draw();['agT','agD','agH'].forEach((id,i)=>{const el=$('#'+id,m);if(el&&keep[i]!=null)el.value=keep[i]});return}
     if('add' in s){const t=$('#agT',m).value.trim(),dv=$('#agD',m).value;if(!dv)return;const a=agAdd({title:t,kind:draw.kind||'task',date:dv,time:$('#agH',m).value||null},'manual');if(!a&&!t)return;toast(a?L('Přidáno','Added'):L('Tohle už v kalendáři máš','Already in your calendar'));draw()}})}
 /* ---------- připomínky ---------- */
 const REM=()=>Object.assign({on:true,time:'18:00',exam:true,cards:true,daily:true},S.prefs.remind||{});
@@ -2666,13 +2845,84 @@ $('#aiCard').onclick=()=>{const A=ED&&ED.ai;const ans=lastAnswer();if(!A||!ans){
   addCard({nbId:ED.nb.id,topic:ED.nb.subject||ED.nb.title,img:cv.toDataURL('image/jpeg',.8),q:'Co je tady potřeba udělat a na co si dát pozor?',a:ans,src:`[s:${ni+1}:${pi+1}]`});toast('Přidáno do opakování. Vrátí se ti zítra.')};
 
 /* ---------- sdílené sešity a synchronizace mezi zařízeními (db) ---------- */
-const DB_P=HAS_CLAUDE?window.claude.use('db').catch(()=>null):Promise.resolve(null);
-const USER_P=HAS_CLAUDE?window.claude.use('user').catch(()=>null):Promise.resolve(null);
+/* ===== Synchronizace přes Supabase: stejné API jako db v prototypu (doc/collection/onSnapshot) =====
+   Tabulka docs(path, parent, data, deleted, seq). Co kdo smí vidět, hlídá databáze (RLS):
+   data/users/<id>/… jen vlastník, shared/<sid>/… jen členové sdíleného sešitu.
+   Novinky se stahují podle rostoucího pořadového čísla změny (seq), po stránkách, takže se nic neztratí. */
+function accUserId(){try{const at=ACC.s&&ACC.s.at;if(!at)return null;return JSON.parse(atob(at.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).sub||null}catch(e){return null}}
+function sbDb(){
+  const ST={cols:new Map(),docs:new Map(),cache:new Map(),ready:new WeakSet(),seq:null,seen:new Map(),mine:new Map(),timer:0,members:new Set(),busy:false,started:false};
+  const base=()=>KCFG.supabaseUrl+'/rest/v1/';const COLS='path,parent,data,deleted,seq';
+  async function hdr(extra){const tok=await accToken();if(!tok)throw {code:'not_signed_in'};return Object.assign({apikey:KCFG.anonKey,authorization:'Bearer '+tok,'content-type':'application/json'},extra||{})}
+  async function rest(path,opt){const ctl=new AbortController(),to=setTimeout(()=>ctl.abort(),30000);let r;
+    try{r=await fetch(base()+path,Object.assign({},opt,{signal:ctl.signal,headers:await hdr(opt&&opt.headers)}))}catch(e){throw {code:'offline'}}finally{clearTimeout(to)}
+    if(!r.ok){const t=await r.text().catch(()=>'');throw {code:r.status===401||r.status===403?'invalid_argument':'unavailable',detail:t.slice(0,200)}}const t=await r.text();return t?JSON.parse(t):null}
+  const parentOf=p=>p.split('/').slice(0,-1).join('/'),idOf=p=>p.split('/').pop();
+  const sidOf=p=>p.startsWith('shared/')?p.split('/')[1]:null;
+  async function ensureMember(p){const sid=sidOf(p);if(!sid||ST.members.has(sid))return;
+    await rest('shared_members?on_conflict=sid,user_id',{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=minimal'},body:JSON.stringify({sid})});ST.members.add(sid)}
+  const snapDoc=(path,row)=>({id:idOf(path),exists:!!row&&!row.deleted,data:()=>row&&!row.deleted?row.data:undefined});
+  async function fetchAll(q){let out=[],from=0;for(;;){const rows=await rest(q+'&order=path.asc',{headers:{Range:`${from}-${from+999}`}});out=out.concat(rows||[]);if(!rows||rows.length<1000)break;from+=1000}return out}
+  function deliver(cb,snap){if(!ST.ready.has(cb))return;try{cb(snap)}catch(e){console.error(e)}}
+  function emitCol(parent,changes){const L=ST.cols.get(parent);if(!L||!L.size)return;const m=ST.cache.get(parent)||new Map();
+    const docs=[...m.entries()].map(([id,row])=>snapDoc(parent+'/'+id,row));const snap={docs,empty:!docs.length,docChanges:()=>changes};for(const cb of L)deliver(cb,snap)}
+  function apply(row){const mine=ST.mine.get(row.path);if(mine&&row.seq<mine)return; // starší ozvěna vlastního zápisu
+    const parent=row.parent,id=idOf(row.path);
+    if(ST.cols.has(parent)){const m=ST.cache.get(parent)||new Map();ST.cache.set(parent,m);const had=m.has(id);
+      if(row.deleted){if(had){m.delete(id)}emitCol(parent,[{type:'removed',doc:snapDoc(row.path,null)}])}
+      else{m.set(id,row);emitCol(parent,[{type:had?'modified':'added',doc:snapDoc(row.path,row)}])}}
+    const DL=ST.docs.get(row.path);if(DL)for(const cb of DL)deliver(cb,snapDoc(row.path,row))}
+  // novinky: po stránkách podle seq; malý přesah zpět chytí zápisy, které se potvrdily o chlup později
+  async function poll(){if(ST.busy||ST.seq==null)return;ST.busy=true;try{if(!ACC.s)return;let from=Math.max(0,ST.seq-300);
+      for(let page=0;page<50;page++){const rows=await rest(`docs?select=${COLS}&seq=gt.${from}&order=seq.asc&limit=1000`);
+        for(const r of rows||[]){const k=r.path+'|'+r.seq;if(r.seq>ST.seq)ST.seq=r.seq;if(ST.seen.has(k))continue;ST.seen.set(k,1);apply(r)}
+        if(!rows||rows.length<1000)break;from=rows[rows.length-1].seq}
+      if(ST.seen.size>30000)ST.seen=new Map([...ST.seen].slice(-8000))}
+    catch(e){}finally{ST.busy=false}}
+  function loop(){clearTimeout(ST.timer);ST.timer=setTimeout(async()=>{await poll();loop()},document.hidden?30000:3000)}
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ST.started){poll();loop()}});
+  async function start(){if(ST.started)return;ST.started=true;try{const r=await rest('rpc/docs_last_seq',{method:'POST',body:'{}'});ST.seq=+r||0}catch(e){ST.started=false;throw e}loop()}
+  async function loadCol(parent){const rows=await fetchAll(`docs?select=${COLS}&parent=eq.${encodeURIComponent(parent)}`);const m=new Map(),dead=[];
+    for(const r of rows){ST.seen.set(r.path+'|'+r.seq,1);if(r.deleted)dead.push(r);else m.set(idOf(r.path),r)}ST.cache.set(parent,m);return {m,dead}}
+  function firstSnap(parent,res){const docs=[...res.m.entries()].map(([id,row])=>snapDoc(parent+'/'+id,row));
+    // smazané věci pošleme jako "removed", ať je zařízení, které bylo offline, taky smaže
+    return {docs,empty:!docs.length,docChanges:()=>docs.map(doc=>({type:'added',doc})).concat(res.dead.map(r=>({type:'removed',doc:snapDoc(r.path,null)})))}}
+  async function write(path,body){await ensureMember(path);const rows=await rest('docs?on_conflict=path&select=seq',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify(body)});
+    const sq=rows&&rows[0]&&rows[0].seq;if(sq)ST.mine.set(path,sq)}
+  const db={
+    doc(path){return {
+      set(data){return write(path,{path,parent:parentOf(path),data,deleted:false})},
+      delete(){return write(path,{path,parent:parentOf(path),data:null,deleted:true})},
+      async get(){const rows=await rest(`docs?select=${COLS}&path=eq.${encodeURIComponent(path)}`);return snapDoc(path,rows&&rows[0])},
+      onSnapshot(cb,err){let L=ST.docs.get(path);if(!L){L=new Set();ST.docs.set(path,L)}L.add(cb);
+        const go=async(n)=>{try{await start();await ensureMember(path);const rows=await rest(`docs?select=${COLS}&path=eq.${encodeURIComponent(path)}`);if(!L.has(cb))return;ST.ready.add(cb);cb(snapDoc(path,rows&&rows[0]))}
+          catch(e){if(L.has(cb)&&ACC.s&&n<20)setTimeout(()=>go(n+1),Math.min(60000,3000*(n+1)));else err&&err(e)}};go(0);
+        return ()=>L.delete(cb)}}},
+    collection(parent){return {
+      onSnapshot(cb,err){let L=ST.cols.get(parent);if(!L){L=new Set();ST.cols.set(parent,L)}L.add(cb);
+        const go=async(n)=>{try{await start();if(parent.startsWith('shared/'))await ensureMember(parent+'/x');const res=await loadCol(parent);if(!L.has(cb))return;ST.ready.add(cb);cb(firstSnap(parent,res));poll()}
+          catch(e){if(L.has(cb)&&ACC.s&&n<20)setTimeout(()=>go(n+1),Math.min(60000,3000*(n+1)));else err&&err(e)}};go(0);
+        return ()=>L.delete(cb)}}},
+    // připojení ke sdílenému sešitu (odkaz nebo kód) a znovunačtení seznamu
+    async join(sid){await ensureMember('shared/'+sid);const L=ST.cols.get('shared');if(L&&L.size){await loadCol('shared');emitCol('shared',[])}},
+    // po přihlášení: načíst znovu všechno, co appka sleduje
+    async reload(){ST.members.clear();ST.started=false;ST.seq=null;await start();
+      for(const parent of [...ST.cols.keys()]){try{if(parent.startsWith('shared/'))await ensureMember(parent+'/x');const res=await loadCol(parent);const snap=firstSnap(parent,res);for(const cb of ST.cols.get(parent)){ST.ready.add(cb);try{cb(snap)}catch(e){}}}catch(e){}}
+      for(const [path,L] of ST.docs){try{const d=await db.doc(path).get();for(const cb of L){ST.ready.add(cb);cb(d)}}catch(e){}}}};
+  return db}
+
+const DB_P=HAS_CLAUDE?window.claude.use('db').catch(()=>null):(HAS_API?Promise.resolve(sbDb()):Promise.resolve(null));
+const USER_P=HAS_CLAUDE?window.claude.use('user').catch(()=>null):(HAS_API?Promise.resolve({id:async()=>accUserId()}):Promise.resolve(null));
 const ME={id:null};const SYNC={on:false,seen:new Set(),lastState:'',stT:0,ready:false};
 const SHR={subs:new Map(),last:new Map(),ids:new Map(),list:[],pushT:new Map(),q:new Map(),meta:new Map(),warned:false};
 function nbBase(nb){if(nb.shared)return 'shared/'+nb.shared.sid;if(nb.cloud&&ME.id)return `data/users/${ME.id}/nb_${nb.cloud}`;return null}
-function writeQ(key,fn){const prev=SHR.q.get(key)||Promise.resolve();const n=prev.then(fn).catch(e=>{if(!SHR.warned){SHR.warned=true;toast(e&&e.code==='invalid_argument'?'Sem nemůžeš zapisovat. Požádej o přístup s úpravami.':'Synchronizace se nepovedla, zkusím to znovu při další změně.',4200)}});SHR.q.set(key,n);return n}
-function metaOf(nb){return {title:nb.title,subject:nb.subject||'',cover:nb.cover,paper:nb.paper,layout:nb.layout,pages:nb.pages.map(p=>({id:p.id,h:Math.round(p.h)}))}}
+function writeQ(key,fn){const prev=SHR.q.get(key)||Promise.resolve();const n=prev.then(fn).then(()=>{SHR.fails=0},e=>{
+    if(e&&e.code==='invalid_argument'){if(!SHR.warned){SHR.warned=true;toast(L('Sem nemůžeš zapisovat. Požádej o přístup s úpravami.','You cannot write here. Ask for edit access.'),4200)}return}
+    // zapomenout, že se to odeslalo, a za chvíli poslat znovu
+    SHR.last.delete(key);if(key.startsWith('meta/'))SHR.meta.delete(key.slice(5));if(key==='state')SYNC.lastState='';syncRetry()});SHR.q.set(key,n);return n}
+function syncRetry(){if(SHR.retryT)return;SHR.fails=(SHR.fails||0)+1;if(SHR.fails===3)toast(L('Synchronizace se teď nedaří – zkouším to znovu, nic se neztratí.','Sync is not working right now – retrying, nothing is lost.'),4000);
+  SHR.retryT=setTimeout(()=>{SHR.retryT=0;S.notebooks.forEach(nb=>{if(nbBase(nb))schedulePush(nb)});if(SYNC.on)schedulePushState()},Math.min(60000,4000*Math.pow(1.6,Math.min(8,SHR.fails))))}
+function metaOf(nb){return {title:nb.title,subject:nb.subject||'',cover:nb.cover,paper:nb.paper,layout:nb.layout,layers:nb.layers||[],pages:nb.pages.map(p=>({id:p.id,h:Math.round(p.h)}))}}
 function shrinkSrc(src,max){return new Promise(res=>{const im=new Image();im.onload=()=>{let k=Math.min(1,900/Math.max(im.width,im.height)),q=.72,out=src;for(let i=0;i<5;i++){const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));const c=cv.getContext('2d');c.fillStyle='#fff';c.fillRect(0,0,cv.width,cv.height);c.drawImage(im,0,0,cv.width,cv.height);out=cv.toDataURL('image/jpeg',q);if(out.length<max)break;k*=.75;q=Math.max(.5,q-.08)}res(out)};im.onerror=()=>res(src);im.src=src})}
 function schedulePush(nb){clearTimeout(SHR.pushT.get(nb.id));SHR.pushT.set(nb.id,setTimeout(()=>pushShared(nb),450))}
 async function pushShared(nb){const db=await DB_P;const base=nbBase(nb);if(!db||!base)return;const known=SHR.ids.get(base)||new Set();SHR.ids.set(base,known);const present=new Set();
@@ -2693,6 +2943,7 @@ function subscribeShared(nb){const base=nbBase(nb);if(!base||SHR.subs.has(base))
   const u2=db.doc(base).onSnapshot(sn=>{if(!sn.exists)return;const m=sn.data()||{};if(m.deleted)return;let ch=false;
     if(m.title&&m.title!==nb.title){nb.title=m.title;ch=true;if(ED&&ED.nb===nb)$('#edTitle').value=nb.title}
     for(const k of ['subject','cover','paper','layout'])if(m[k]!=null&&JSON.stringify(m[k])!==JSON.stringify(nb[k])){nb[k]=m[k];ch=true}
+    if(Array.isArray(m.layers)){const lv=m.layers.length>1?m.layers:null;if(JSON.stringify(lv)!==JSON.stringify(nb.layers||null)){if(lv)nb.layers=lv;else delete nb.layers;ch=true;if(ED&&ED.nb===nb){ED.layer=Math.min(ED.layer||0,lv?lv.length-1:0);renderTools()}}}
     for(const p of (m.pages||[])){const pg=nb.pages.find(x=>x.id===p.id);if(!pg){nb.pages.push({id:String(p.id),h:p.h||H,objs:[],rev:0,ocr:'',ocrRev:0});ch=true}else if(p.h>pg.h){pg.h=p.h;ch=true}}
     SHR.meta.set(base,JSON.stringify(metaOf(nb)));if(ch){thumbs.delete(nb.id);save();refreshShared(nb,null)}},()=>{});
   SHR.subs.set(base,[u1,u2])})}
@@ -2706,15 +2957,15 @@ function nbFromMeta(m){const nb={id:uid(),title:m.title||'Sešit',subject:m.subj
   if(!nb.pages.length)nb.pages=[{id:uid(),h:H,objs:[],rev:0,ocr:'',ocrRev:0}];return nb}
 $('#sharedSec').addEventListener('click',e=>{const b=e.target.closest('[data-join]');if(!b)return;const m=SHR.list.find(x=>x.sid===b.dataset.join);if(!m)return;
   const nb=nbFromMeta(m);nb.shared={sid:m.sid};SHR.meta.set('shared/'+m.sid,JSON.stringify(metaOf(nb)));S.notebooks.push(nb);save();subscribeShared(nb);renderLib();toast('Sešit přidán. Co kdo napíše, uvidí všichni naživo.',3600)});
-async function shareNotebook(nb,btn){const db=await DB_P;if(!db){toast('Sdílení funguje v aplikaci Claude.',3500);return false}
-  if(btn){btn.disabled=true;btn.textContent='Nahrávám sešit…'}const oldBase=nbBase(nb);const sid=uid();
+async function shareNotebook(nb,btn){if(HAS_API&&!ACC.s){toast(L('Ke sdílení se nejdřív přihlas (Nastavení → Účet a synchronizace).','Sign in first to share (Settings → Account & sync).'),4500);closeModal();settingsDialog();return false}const db=await DB_P;if(!db){toast('Sdílení funguje v aplikaci Claude.',3500);return false}
+  if(btn){btn.disabled=true;btn.textContent='Nahrávám sešit…'}const oldBase=nbBase(nb);const sid=HAS_API?(window.crypto&&crypto.randomUUID?crypto.randomUUID().replace(/-/g,''):uid()+uid()+uid()):uid();
   try{nb.shared={sid};const base=nbBase(nb);SHR.ids.set(base,new Set());SHR.subs.set(base,[]);await db.doc(base).set(Object.assign({updated:Date.now()},metaOf(nb)));SHR.meta.set(base,JSON.stringify(metaOf(nb)));await pushShared(nb);await Promise.all([...SHR.q.values()]);SHR.subs.delete(base);subscribeShared(nb);
     if(oldBase&&oldBase!==base){unsubscribeBase(oldBase);writeQ('meta/'+oldBase,()=>db.doc(oldBase).set({deleted:true,movedTo:sid,updated:Date.now()}))}save();return true}
   catch(e){delete nb.shared;toast(e&&e.code==='invalid_argument'?'Nemáš právo sdílet. Sdílet může vlastník Loopnote nebo kdo má úpravy.':'Sdílení se nepovedlo. Zkus to znovu.',4000);return false}
   finally{if(btn&&btn.isConnected)btn.disabled=false}}
 function shareDialog(nb){const m=openModal(`<div class="modal-h"><h2>Sdílet se spolužáky</h2><button class="iconbtn" type="button" data-x aria-label="Zavřít"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><div class="modal-b" id="shBody"></div>`);m.style.maxWidth='560px';
   const draw=()=>{$('#shBody',m).innerHTML=nb.shared?`<div class="promise"><b>„${esc(nb.title)}“ je sdílený.</b>Co kdokoli napíše, nakreslí nebo vymaže, uvidí ostatní naživo. Ideální na společné zápisky z přednášek: každý dopíše, co má.</div>
-      <p class="fine" style="margin:0">Spolužáci ho najdou v knihovně v sekci „Sdílené se mnou“. V prototypu k tomu potřebují přístup k Loopnote: v Claude dej vpravo nahoře Sdílet a pozvi je s možností úprav.</p>
+      <p class="fine" style="margin:0">${HAS_API?L('Spolužáci si ho přidají přes odkaz nebo kód níže. Musí být přihlášení (stačí e-mail).','Classmates add it with the link or code below. They need to be signed in (just an email).'):'Spolužáci ho najdou v knihovně v sekci „Sdílené se mnou“. V prototypu k tomu potřebují přístup k Loopnote: v Claude dej vpravo nahoře Sdílet a pozvi je s možností úprav.'}</p>${shareHintHTML(nb)}
       <div class="row"><button type="button" class="btn" data-unlink>Přestat sdílet na tomhle zařízení</button></div>`
     :`<p style="margin:0">Ze sešitu „${esc(nb.title)}“ uděláš společný sešit předmětu. Všichni do něj můžou psát a změny se ukazují naživo.</p>
       <ul class="fine" style="margin:0;padding-left:18px"><li>Každý dopíše kus přednášky, který má.</li><li>Pomocník pak zná zápisky celé skupiny.</li><li>Fotky se kvůli rychlosti zmenší.</li></ul>
@@ -2751,7 +3002,7 @@ initCloud();
 
 /* ---------- nahrávka přednášky propojená s psaním ---------- */
 const REC={audio:null,id:null,url:null,link:true};
-function stampRec(o){if(REC.audio&&!REC.audio.paused&&REC.link&&REC.id)o.at={r:REC.id,t:Math.round(REC.audio.currentTime*10)/10}}
+function stampRec(o){const lc=LREC.cur;if(lc&&lc.on&&REC.link&&ED&&lc.nb===ED.nb){o.at={r:lc.id,t:Math.round((Date.now()-lc.t0)/100)/10};return}if(REC.audio&&!REC.audio.paused&&REC.link&&REC.id)o.at={r:REC.id,t:Math.round(REC.audio.currentTime*10)/10}}
 const fmtT=t=>{t=Math.max(0,Math.floor(t||0));return Math.floor(t/60)+':'+String(t%60).padStart(2,'0')};
 function recAudio(){if(!REC.audio){REC.audio=new Audio();REC.audio.preload='auto';['timeupdate','play','pause','loadedmetadata','ended'].forEach(ev=>REC.audio.addEventListener(ev,()=>updRecBar()))}return REC.audio}
 async function loadRec(id){if(REC.id===id&&REC.url)return true;const blob=await idbGet('rec:'+id);if(!blob){toast('Nahrávka se nenašla. Načti ji znovu.',3500);return false}
@@ -2764,9 +3015,9 @@ function openRecBar(){if(!ED)return;let b=$('#recBar');if(!b){b=document.createE
     b.addEventListener('change',async e=>{if(e.target.id==='recSel'){await loadRec(e.target.value);renderRecBar()}})}
   if(!ED.nb.recs)ED.nb.recs=[];if(!REC.id&&ED.nb.recs.length)loadRec(ED.nb.recs[ED.nb.recs.length-1].id).then(renderRecBar);renderRecBar()}
 function renderRecBar(){const b=$('#recBar');if(!b||!ED)return;const recs=ED.nb.recs||[];
-  b.innerHTML=`<div class="row" style="flex-wrap:nowrap"><b class="rec-t">Přednáška</b>${recs.length?`<select id="recSel" class="sel" aria-label="Nahrávka">${recs.map(r=>`<option value="${r.id}" ${r.id===REC.id?'selected':''}>${esc(r.name)}</option>`).join('')}</select>`:''}<button type="button" data-a="load">${recs.length?'+':'Načíst nahrávku'}</button><span class="grow"></span><button type="button" data-a="close" aria-label="Zavřít">✕</button></div>
+  b.innerHTML=`<div class="row" style="flex-wrap:nowrap"><b class="rec-t">Přednáška</b>${recs.length?`<select id="recSel" class="sel" aria-label="Nahrávka">${recs.map(r=>`<option value="${r.id}" ${r.id===REC.id?'selected':''}>${esc(r.name)}</option>`).join('')}</select>`:''}${lecRecBtn()}<button type="button" data-a="load" title="${L('Načíst nahrávku ze souboru','Load a recording from a file')}">${recs.length?'+':L('Načíst','Load')}</button><span class="grow"></span><button type="button" data-a="close" aria-label="Zavřít">✕</button></div>
    ${REC.id?`<div class="row" style="flex-wrap:nowrap"><button type="button" data-a="back" aria-label="O 10 s zpět">−10 s</button><button type="button" class="pri" data-a="play" id="recPlay">Přehrát</button><input type="range" id="recSeek" min="0" max="1" step="0.1" value="0" aria-label="Pozice v nahrávce" style="flex:1;min-width:0"><span id="recTime" class="rec-time">0:00</span></div>
-   <button type="button" class="rec-link" data-a="link" aria-pressed="${REC.link}"><span class="knob"></span>Co napíšu během přehrávání, se připojí k nahrávce</button>`:'<p class="rec-hint">Načti zvuk přednášky (třeba z Diktafonu). Pak ťukneš na svou poznámku a přehraje se, co v tu chvíli zaznělo. V hotové appce se bude nahrávat rovnou při psaní.</p>'}`;updRecBar()}
+   <button type="button" class="rec-link" data-a="link" aria-pressed="${REC.link}"><span class="knob"></span>Co napíšu během přehrávání, se připojí k nahrávce</button>${lecNotesBtn()}`:`<p class="rec-hint">${L('Ťukni na ● Nahrávat a piš poznámky. Pak ťukneš na poznámku a přehraje se, co v tu chvíli zaznělo – a pomocník ti z přednášky udělá zápis a kartičky.','Tap ● Record and take notes. Tap a note later to hear that moment – and the helper turns the lecture into notes and flashcards.')}</p>`}`;updRecBar()}
 function updRecBar(){const au=REC.audio;if(!au)return;const s=$('#recSeek'),t=$('#recTime'),p=$('#recPlay');if(s){s.max=au.duration||1;s.value=au.currentTime||0}if(t)t.textContent=`${fmtT(au.currentTime)} / ${fmtT(au.duration)}`;if(p)p.textContent=au.paused?'Přehrát':'Pauza'}
 async function recPlayAt(r,t){openRecBar();if(!(await loadRec(r)))return;renderRecBar();const au=recAudio();const go=()=>{au.currentTime=Math.max(0,t-1.5);au.play().catch(()=>toast('Ťukni na Přehrát'))};if(au.readyState>=1)go();else au.addEventListener('loadedmetadata',go,{once:true})}
 (()=>{const inp=document.createElement('input');inp.type='file';inp.id='recFile';inp.accept='audio/*';inp.hidden=true;document.body.appendChild(inp);
@@ -3231,6 +3482,167 @@ document.addEventListener('click',e=>{const en=e.target.closest('[data-veng]');i
   if(e.target.closest('[data-cvtest]')){unlockAudio();speak(ENB()?VOICE_SAMPLE_EN:VOICE_SAMPLE_CS);return}
   const cv=e.target.closest('[data-cvoice]');if(cv){S.prefs.voice=Object.assign({},S.prefs.voice,{cloud:cv.dataset.cvoice,engine:'cloud'});save();unlockAudio();speak(ENB()?VOICE_SAMPLE_EN:VOICE_SAMPLE_CS);if(typeof renderOnb==='function')renderOnb()}},true);
 document.addEventListener('change',e=>{if(e.target&&e.target.id==='sCloudVoice'){S.prefs.voice=Object.assign({},S.prefs.voice,{cloud:e.target.value});save();speak(ENB()?VOICE_SAMPLE_EN:VOICE_SAMPLE_CS)}},true);
+
+/* ===== Účet a synchronizace: přihlášení kódem z e-mailu, sešity na všech zařízeních, sdílení se spolužáky ===== */
+const SYNCUI={step:'email',email:'',busy:false,err:''};
+async function afterLogin(){if(SYNCUI.afterFor===(ACC.s&&ACC.s.rt))return;SYNCUI.afterFor=ACC.s&&ACC.s.rt;try{const db=await DB_P;if(db&&db.reload)await db.reload()}catch(e){}
+  if(!SYNC.on){try{await initCloud()}catch(e){}}if(typeof watchSharedList==='function'&&!SYNCUI.watched){SYNCUI.watched=true}
+  const j=pendingJoin();if(j)joinShared(j);let rf=null;try{rf=localStorage.getItem('krouzek-ref');localStorage.removeItem('krouzek-ref')}catch(e){}if(rf)setTimeout(()=>refRedeem(rf),1500);toast(L('Přihlášeno – sešity se synchronizují na všech tvých zařízeních.','Signed in – your notebooks now sync across all your devices.'),4000)}
+function pendingJoin(){try{const j=localStorage.getItem('krouzek-join');if(j)localStorage.removeItem('krouzek-join');return j}catch(e){return null}}
+function accountHTML(){if(!HAS_API)return '';const on=!!ACC.s;
+  if(on)return `<div class="group" id="accGroup"><span class="eyebrow">${L('Účet a synchronizace','Account & sync')}</span>
+    <div class="promise"><b>${L('Přihlášen','Signed in')}: ${esc(ACC.s.email||'')}</b>${L('Sešity, opakování i kalendář máš stejné na počítači, tabletu i mobilu. Stačí se všude přihlásit stejným e-mailem.','Your notebooks, reviews and calendar are the same on your computer, tablet and phone. Just sign in with the same email everywhere.')}</div>
+    <div class="row"><input id="joinCode" class="sel" style="flex:1" placeholder="${L('Kód sdíleného sešitu od spolužáka','Shared notebook code from a classmate')}" autocomplete="off"><button type="button" class="btn" data-acc="join">${L('Připojit se','Join')}</button></div>
+    ${refHTML()}
+    <div class="row"><button type="button" class="btn" data-acc="logout">${L('Odhlásit se','Sign out')}</button></div></div>`;
+  return `<div class="group" id="accGroup"><span class="eyebrow">${L('Účet a synchronizace','Account & sync')}</span>
+    <p class="fine" style="margin:0">${L('Přihlas se e-mailem a sešity budeš mít na všech zařízeních. Můžeš je pak i sdílet se spolužáky. Žádné heslo – pošleme ti kód. E-mail použijeme jen k přihlášení.','Sign in with your email to get your notebooks on every device and share them with classmates. No password – we send you a code. Your email is only used to sign in.')}</p>
+    ${SYNCUI.step==='code'?`<div class="row"><input id="accCode" class="sel" style="flex:1" inputmode="numeric" maxlength="10" placeholder="${L('Kód z e-mailu','Code from the email')}" autocomplete="one-time-code"><button type="button" class="btn primary" data-acc="verify" ${SYNCUI.busy?'disabled':''}>${L('Přihlásit','Sign in')}</button></div>
+      <p class="fine" style="margin:0">${L('Kód jsme poslali na','We sent the code to')} ${esc(SYNCUI.email)}. <button type="button" class="linkbtn" data-acc="back">${L('Jiný e-mail','Different email')}</button></p>`
+    :`<div class="row"><input id="accEmail" class="sel" style="flex:1" type="email" placeholder="name@school.edu" value="${esc(SYNCUI.email)}" autocomplete="email"><button type="button" class="btn primary" data-acc="send" ${SYNCUI.busy?'disabled':''}>${L('Poslat kód','Send code')}</button></div>`}
+    ${SYNCUI.err?`<p class="err" style="margin:0">${esc(SYNCUI.err)}</p>`:''}</div>`}
+/* doporučení: pozvi kamaráda, oba dostanete týden Plus */
+function refHTML(){const R=SYNCUI.ref;if(!R){if(!SYNCUI.refLoading){SYNCUI.refLoading=true;refLoad()}return ''}if(!R.code)return '';const link=(SITE||location.origin)+'/app/?ref='+R.code;
+  return `<div class="promise" style="margin-top:4px"><b>🎁 ${L('Pozvi kamaráda – oba dostanete týden Plus zdarma','Invite a friend – you both get a week of Plus free')}</b><small style="display:block">${L('Kamarád ho dostane hned, ty jakmile si v Loopnote něco zapíše.','Your friend gets it right away, you get it once they write something in Loopnote.')}</small>${L('Tvůj kód','Your code')}: <b style="user-select:all">${esc(R.code)}</b> · ${L('pozváno','invited')} ${R.invited}/${R.max}
+    <div class="row" style="margin-top:8px"><button type="button" class="btn" data-acc="refcopy" data-link="${esc(link)}">${L('Kopírovat odkaz','Copy link')}</button></div></div>
+    <div class="row"><input id="refCode" class="sel" style="flex:1" placeholder="${L('Máš kód od kamaráda? Zadej ho','Got a code from a friend? Enter it')}" autocomplete="off"><button type="button" class="btn" data-acc="refuse">${L('Uplatnit','Redeem')}</button></div>`}
+async function refApi(body){const tok=await accToken();if(!tok)throw {code:'not_signed_in'};const r=await fetch(KCFG.supabaseUrl+'/functions/v1/referral',{method:'POST',headers:{'content-type':'application/json',apikey:KCFG.anonKey,authorization:'Bearer '+tok,'x-device':vxDev()},body:JSON.stringify(body)});
+  const d=await r.json().catch(()=>({}));if(!r.ok)throw {code:d.code||'unavailable'};return d}
+async function refLoad(){try{SYNCUI.ref=await refApi({action:'me'})}catch(e){SYNCUI.ref={code:null}}SYNCUI.refLoading=false;accRedraw()}
+async function refRedeem(code){try{const d=await refApi({code});await accPlan();toast(L(`Hotovo! Máš ${d.days} dní Plus zdarma. Kamarád je dostane, jakmile si něco zapíšeš.`,`Done! You get ${d.days} days of Plus free. Your friend gets them once you write something.`),5500);SYNCUI.ref=null;accRedraw()}
+  catch(e){const M={bad_code:L('Tenhle kód neexistuje.','That code does not exist.'),self:L('Vlastní kód uplatnit nejde.','You cannot use your own code.'),not_new:L('Kód jde uplatnit jen do 14 dní od založení účtu.','Codes only work within 14 days of creating your account.'),used:L('Kód od kamaráda už jsi uplatnil.','You have already used a friend\'s code.')};toast(M[e&&e.code]||L('Nepovedlo se. Zkus to znovu.','That did not work. Try again.'),4500)}}
+function accRedraw(){const g=document.getElementById('accGroup');if(g)g.outerHTML=accountHTML()}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-acc]');if(!b)return;const k=b.dataset.acc;SYNCUI.err='';
+  if(k==='send'){const em=(document.getElementById('accEmail').value||'').trim();if(!/^\S+@\S+\.\S+$/.test(em)){SYNCUI.err=L('Zadej platný e-mail.','Enter a valid email.');accRedraw();return}
+    SYNCUI.email=em;SYNCUI.busy=true;accRedraw();try{await accSendLink(em,'');SYNCUI.step='code'}catch(x){SYNCUI.err=L('Kód se nepodařilo poslat. Zkus to za chvíli.','Could not send the code. Try again in a moment.')}SYNCUI.busy=false;accRedraw();setTimeout(()=>{const c=document.getElementById('accCode');c&&c.focus()},50);return}
+  if(k==='verify'){const code=(document.getElementById('accCode').value||'').replace(/\s/g,'');if(code.length<6){SYNCUI.err=L('Opiš celý kód z e-mailu.','Type the whole code from the email.');accRedraw();return}
+    SYNCUI.busy=true;accRedraw();try{await accVerifyCode(SYNCUI.email,code);SYNCUI.step='email';SYNCUI.busy=false;accRedraw()}catch(x){SYNCUI.busy=false;SYNCUI.err=L('Kód nesedí nebo vypršel. Zkus to znovu.','The code is wrong or expired. Try again.');accRedraw()}return}
+  if(k==='back'){SYNCUI.step='email';accRedraw();return}
+  if(k==='logout'){ACC.s=null;accSave();toast(L('Odhlášeno. Sešity zůstaly v tomhle zařízení.','Signed out. Your notebooks stay on this device.'),3000);setTimeout(()=>location.reload(),900);return}
+  if(k==='refcopy'){try{navigator.clipboard.writeText(b.dataset.link);toast(L('Odkaz zkopírován – pošli ho kamarádovi.','Link copied – send it to a friend.'))}catch(x){}return}
+  if(k==='refuse'){const c=(document.getElementById('refCode').value||'').trim();if(c)refRedeem(c);return}
+  if(k==='join'){const c=(document.getElementById('joinCode').value||'').trim().replace(/^.*join=/,'');if(c)joinShared(c);return}},true);
+/* připojení ke sdílenému sešitu přes odkaz (?join=…) nebo kód */
+async function joinShared(sid){sid=String(sid).replace(/[^A-Za-z0-9_-]/g,'');if(sid.length<16){toast(L('Tenhle kód nevypadá správně.','That code does not look right.'),3500);return}
+  if(!ACC.s){try{localStorage.setItem('krouzek-join',sid)}catch(e){}toast(L('Nejdřív se přihlas (Nastavení → Účet a synchronizace). Pak se sešit přidá sám.','Sign in first (Settings → Account & sync). The notebook is added automatically afterwards.'),5000);settingsDialog();return}
+  const db=await DB_P;try{await db.join(sid);await new Promise(r=>setTimeout(r,600));const m=SHR.list.find(x=>x.sid===sid);
+    if(!m){toast(L('Sešit jsem nenašel. Zkontroluj kód.','Notebook not found. Check the code.'),4000);return}
+    if(S.notebooks.some(n=>n.shared&&n.shared.sid===sid)){toast(L('Tenhle sešit už máš.','You already have this notebook.'));return}
+    const nb=nbFromMeta(m);nb.shared={sid};SHR.meta.set('shared/'+sid,JSON.stringify(metaOf(nb)));S.notebooks.push(nb);save();subscribeShared(nb);if($('#modalRoot').children.length)closeModal();renderLib();renderSharedSec();toast(L('Sešit přidán. Co kdo napíše, uvidí všichni naživo.','Notebook added. Everyone sees changes live.'),3600)}
+  catch(e){toast(L('Připojení se nepovedlo. Zkus to znovu.','Could not join. Try again.'),4000)}}
+function shareHintHTML(nb){if(!HAS_API)return '';const sid=nb.shared&&nb.shared.sid;if(!sid)return '';const link=(SITE||location.origin)+'/app/?join='+sid;
+  return `<div class="group"><span class="eyebrow">${L('Pošli spolužákům','Send to classmates')}</span><div class="row"><input class="sel" style="flex:1" readonly value="${esc(link)}" id="shLink"><button type="button" class="btn" data-copylink>${L('Kopírovat','Copy')}</button></div>
+    <p class="fine" style="margin:0">${L('V appce můžou místo odkazu zadat kód','In the app they can enter this code instead')}: <b style="user-select:all">${esc(sid)}</b> (${L('Nastavení → Účet a synchronizace','Settings → Account & sync')})</p></div>`}
+document.addEventListener('click',e=>{if(!e.target.closest('[data-copylink]'))return;const i=document.getElementById('shLink');if(!i)return;try{navigator.clipboard.writeText(i.value);toast(L('Odkaz zkopírován','Link copied'))}catch(x){i.select()}},true);
+setTimeout(function refFromUrl(){const q=new URLSearchParams(location.search);const r=q.get('ref');if(!r)return;history.replaceState(null,'',location.pathname);
+  if(ACC.s)setTimeout(()=>refRedeem(r),2000);else{try{localStorage.setItem('krouzek-ref',r)}catch(e){}setTimeout(()=>toast(L('Kamarád tě pozval! Přihlas se (Nastavení → Účet) a oba dostanete týden Plus.','A friend invited you! Sign in (Settings → Account) and you both get a week of Plus.'),6000),2500)}},0);
+setTimeout(function joinFromUrl(){const q=new URLSearchParams(location.search);const j=q.get('join');if(j){history.replaceState(null,'',location.pathname);setTimeout(()=>joinShared(j),1500)}
+  else if(HAS_API&&ACC.s){const pj=pendingJoin();if(pj)setTimeout(()=>joinShared(pj),2500)}},0);
+
+/* ===== Přednáška: nahrávání rovnou v appce + zápis a kartičky z nahrávky =====
+   Nahrávka se průběžně ukládá (celá i po dvouminutových kouscích), takže se neztratí ani při pádu nebo vybité baterii. */
+const LREC={cur:null,busy:null,ctl:null};
+const lecOn=()=>!!(LREC.cur&&LREC.cur.on);
+function lecRecBtn(){if(!(navigator.mediaDevices&&window.MediaRecorder))return '';const c=LREC.cur;return `<button type="button" data-lec="rec" class="${lecOn()?'pri':''}" ${c&&!c.on&&c.pend>0?'disabled':''}>${lecOn()?'■ '+fmtT((Date.now()-c.t0)/1000):'● '+L('Nahrávat','Record')}</button>`}
+function lecNotesBtn(){if(!HAS_API)return '';return `<div class="row" style="flex-wrap:nowrap"><button type="button" data-lec="notes" ${LREC.busy||lecOn()?'disabled':''} style="flex:1">${LREC.busy?esc(LREC.busy):'📝 '+L('Udělat z přednášky zápis a kartičky','Turn the lecture into notes + flashcards')}</button>${LREC.busy?`<button type="button" data-lec="cancel" aria-label="${L('Zrušit','Cancel')}">✕</button>`:''}</div>`}
+const lecMime=()=>['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+const lecRec=st=>new MediaRecorder(st,lecMime()?{mimeType:lecMime(),audioBitsPerSecond:32000}:undefined);
+async function lecPersist(c){try{await idbSet('rec:'+c.id,new Blob(c.chunks,{type:c.type}));if(c.segs.length)await idbSet('recseg:'+c.id,c.segs.slice())}catch(e){}}
+function lecSegStart(c){if(!c.on)return;const r=lecRec(c.stream),parts=[];c.pend++;c.seg=r;
+  r.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data)};
+  r.onstop=()=>{if(parts.length){c.segs.push(new Blob(parts,{type:r.mimeType||c.type}));lecPersist(c)}c.pend--;if(c.on&&!r._rot)lecStop(c);else lecMaybeSave(c)};
+  r.start();clearTimeout(c.segT);c.segT=setTimeout(()=>{if(c.on&&r.state==='recording'){r._rot=true;r.stop();lecSegStart(c)}},120000)}
+async function lecStart(){if(!ED||lecOn())return;if(LREC.cur&&LREC.cur.pend>0)return;let st;
+  try{st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:true,autoGainControl:true}})}catch(e){toast(L('Nemám přístup k mikrofonu. Povol ho v nastavení.','No microphone access. Allow it in settings.'),4000);return}
+  recAudio().pause();const nb=ED.nb,id=uid(),t0=Date.now();
+  const c={on:true,id,nb,t0,stream:st,chunks:[],segs:[],pend:0,type:lecMime()||'audio/webm',saved:false,stopping:false};LREC.cur=c;
+  // záznam hned v sešitě, ať je vidět i kdyby se appka zavřela
+  const d=new Date(t0);nb.recs=nb.recs||[];nb.recs.push({id,name:L('Přednáška ','Lecture ')+d.toLocaleDateString(LOC())+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'),added:t0,live:1,recording:1});touch(nb);
+  const mr=lecRec(st);c.mr=mr;c.type=mr.mimeType||c.type;c.pend++;
+  mr.ondataavailable=e=>{if(e.data&&e.data.size){c.chunks.push(e.data);if(c.chunks.length%6===0)lecPersist(c)}}; // každých ~30 s uložit
+  mr.onstop=()=>{c.pend--;if(c.on)lecStop(c);else lecMaybeSave(c)};mr.start(5000);lecSegStart(c);
+  st.getAudioTracks().forEach(t=>t.addEventListener('ended',()=>lecStop(c))); // hovor, odpojený mikrofon…
+  try{if(navigator.wakeLock)c.wake=await navigator.wakeLock.request('screen')}catch(e){}
+  c.timer=setInterval(()=>{const b=document.querySelector('[data-lec="rec"]');if(b)b.textContent='■ '+fmtT((Date.now()-c.t0)/1000)},1000);renderRecBar();
+  toast(L('Nahrávám. Piš poznámky – každá se spojí s místem v nahrávce. Nech appku otevřenou.','Recording. Take notes – each one links to that moment. Keep the app open.'),4500)}
+function lecStop(c){c=c||LREC.cur;if(!c||!c.on)return;c.on=false;clearInterval(c.timer);clearTimeout(c.segT);try{c.mr.state!=='inactive'&&c.mr.stop()}catch(e){}try{c.seg&&c.seg.state!=='inactive'&&c.seg.stop()}catch(e){}
+  try{c.stream.getTracks().forEach(t=>t.stop())}catch(e){}try{c.wake&&c.wake.release()}catch(e){}renderRecBar();lecMaybeSave(c)}
+async function lecMaybeSave(c){if(c.on||c.pend>0||c.saved)return;c.saved=true;await lecPersist(c);const nb=c.nb,rec=(nb.recs||[]).find(r=>r.id===c.id);
+  if(rec){delete rec.recording;rec.dur=Math.round((Date.now()-c.t0)/1000)}touch(nb);if(ED&&ED.nb===nb){await loadRec(c.id);renderRecBar()}
+  toast(c.chunks.length?L('Nahrávka uložená. Můžeš z ní nechat udělat zápis.','Recording saved. You can turn it into notes.'):L('Nahrávka je prázdná.','The recording is empty.'),4000)}
+// nahrávka přerušená pádem appky: co se stihlo uložit, zůstane
+setTimeout(()=>{try{for(const nb of S.notebooks)for(const r of nb.recs||[])if(r.recording&&!(LREC.cur&&LREC.cur.id===r.id)){delete r.recording;r.cut=1}}catch(e){}},0);
+function pcmRms(a){let s=0,n=0;for(let i=0;i<a.length;i+=8){s+=a[i]*a[i];n++}return Math.sqrt(s/Math.max(1,n))}
+async function lecDecode(blob,sr){const AC=window.AudioContext||window.webkitAudioContext;let ac;try{ac=new AC({sampleRate:sr})}catch(e){ac=new AC()}
+  try{const au=await ac.decodeAudioData(await blob.arrayBuffer());const n=au.length,out=new Float32Array(n);for(let c=0;c<au.numberOfChannels;c++){const d=au.getChannelData(c);for(let i=0;i<n;i++)out[i]+=d[i]/au.numberOfChannels}return {pcm:out,sr:au.sampleRate}}finally{ac.close().catch(()=>{})}}
+async function lecNotes(){if(!ED||!REC.id||LREC.busy)return;const nb=ED.nb,rid=REC.id,rec=(nb.recs||[]).find(r=>r.id===rid);if(usageLeft()<=0){plansDialog();return}
+  const ctl={stop:false};LREC.ctl=ctl;const set=t=>{LREC.busy=t;renderRecBar()};let text=rec&&rec.transcript||'',gaps=0;
+  try{if(!text){set(L('Načítám nahrávku…','Loading the recording…'));const segs=await idbGet('recseg:'+rid);const pieces=[];const SEC=120;
+      const cut=(pcm,sr,at)=>{for(let i=0;i*SEC*sr<pcm.length;i++)pieces.push({at:at+i*SEC,pcm:pcm.subarray(i*SEC*sr,Math.min(pcm.length,(i+1)*SEC*sr)),sr})};
+      if(Array.isArray(segs)&&segs.length){let at=0;for(const b of segs){pieces.push({at,blob:b});at+=SEC}}
+      else{const blob=await idbGet('rec:'+rid);if(!blob){toast(L('Nahrávka se nenašla.','Recording not found.'));return}
+        if(blob.size>120e6){toast(L('Nahrávka je moc velká (víc než 120 MB). Nahraj ji radši rovnou v appce.','The recording is too large (over 120 MB). Record it directly in the app instead.'),5000);return}
+        const all=await lecDecode(blob,12000);cut(all.pcm,all.sr,0)}
+      for(let i=0;i<pieces.length;i++){if(ctl.stop)throw {code:'cancelled'};set(L(`Přepisuji ${i+1}/${pieces.length}…`,`Transcribing ${i+1}/${pieces.length}…`));let p=pieces[i];
+        if(p.blob){let d;try{d=await lecDecode(p.blob,16000)}catch(e){gaps++;continue}if(d.pcm.length>SEC*1.2*d.sr){const n0=pieces.length;cut(d.pcm,d.sr,p.at);const extra=pieces.splice(n0);pieces.splice(i,1,...extra);p=pieces[i]}else p={at:p.at,pcm:d.pcm,sr:d.sr}}
+        if(pcmRms(p.pcm)<.002)continue;const wav=encWav([p.pcm],p.sr);let t='',err=null;
+        for(let k=0;k<2&&!t;k++){try{t=await vxTranscribe(wav)}catch(e){err=e;if(e&&(e.code==='usage'||e.code==='cancelled'))throw e}}
+        if(!t&&err){if(i===0)throw err;gaps++}if(t)text+=`[${fmtT(p.at)}] ${t}\n`}
+      if(!text.trim()){toast(L('V nahrávce není slyšet řeč.','No speech found in the recording.'),4000);return}
+      if(rec&&!gaps){rec.transcript=text;touch(nb)}} // neúplný přepis neukládat, ať se příště zkusí celý
+    if(ctl.stop)throw {code:'cancelled'};set(L('Píšu zápis a kartičky…','Writing notes and flashcards…'));const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};
+    const r=await sample.json(`${TEACHER()}
+${profileCtx(nb)}
+JAK MLUVIT: ${styleGuide()}
+Níže je přepis přednášky (s časy v hranatých závorkách). Udělej z něj přehledný studijní zápis do sešitu „${nb.title}“: hlavní témata jako sekce "## …", pod nimi odrážky "- " s tím podstatným, definice, vzorce (znaky Unicode jako x², √, π, ·, žádný LaTeX), důležité příklady a na konci "## Co si zapamatovat" se 3–6 body. Vynech omáčku, organizační věci a opakování. Piš jazykem přednášky. ${NO_CHAT}
+Potom vytvoř 6–10 kartiček na opakování. ${GEN_RULE}
+Odpověz jen JSON: {"title":"krátký název přednášky","notes":"zápis v markdownu","cards":[{"q":"otázka","a":"krátká odpověď","topic":"krátké téma"}]}
+
+PŘEPIS:
+${text.slice(0,200000)}`,{modelTier:S.profile.ai==='quick'?'default':S.profile.ai});spendUsage();
+    if(ctl.stop)throw {code:'cancelled'};if(!r||!r.notes)throw {code:'invalid_json'};const pi=appendNote(nb,mdToNote(String(r.notes),String(r.title||rec&&rec.name||'')));let nc=0;
+    (Array.isArray(r.cards)?r.cards:[]).filter(c=>c&&c.q&&c.a).slice(0,12).forEach(c=>{addCard({nbId:nb.id,q:String(c.q),a:String(c.a),topic:String(c.topic||nb.title).slice(0,40),src:`[s:${S.notebooks.indexOf(nb)+1}:${pi+1}]`});nc++});
+    nb.edited=true;touch(nb);save();if(ED&&ED.nb===nb){refreshEdPages();const v=ED.views[pi];if(v)v.wrap.scrollIntoView({behavior:'smooth',block:'start'})}
+    toast(L(`Hotovo: zápis na straně ${pi+1} a ${nc} kartiček do opakování.`,`Done: notes on page ${pi+1} and ${nc} flashcards for review.`)+(gaps?' '+L(`(${gaps} kousků nahrávky se nepodařilo přepsat.)`,`(${gaps} parts could not be transcribed.)`):''),5500)}
+  catch(e){if(!(e&&e.code==='cancelled'))toast(errCopy(e&&e.code),5000)}finally{LREC.busy=null;LREC.ctl=null;renderRecBar()}}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-lec]');if(!b)return;const k=b.dataset.lec;
+  if(k==='rec'){lecOn()?lecStop():lecStart()}else if(k==='notes')lecNotes();else if(k==='cancel'&&LREC.ctl){LREC.ctl.stop=true;b.disabled=true}},true);
+window.addEventListener('pagehide',()=>{const c=LREC.cur;if(c&&c.on)lecPersist(c)});
+
+/* ===== Android: bublina přes ostatní aplikace (nativní plugin LoopnoteOverlay) ===== */
+function AOV(){try{return window.Capacitor&&Capacitor.getPlatform&&Capacitor.getPlatform()==='android'&&Capacitor.Plugins&&Capacitor.Plugins.LoopnoteOverlay||null}catch(e){return null}}
+const ABUB={running:false,waitPerm:false};
+async function aRefresh(){const A=AOV();if(!A)return;try{ABUB.running=!!(await A.isRunning()).value}catch(e){}const g=document.getElementById('abGroup');if(g)g.outerHTML=androidBubbleHTML()}
+function androidBubbleHTML(){if(!AOV())return '';return `<div class="group" id="abGroup"><span class="eyebrow">${L('Bublina přes ostatní aplikace','Bubble over other apps')}</span>
+  <p class="fine" style="margin:0">${L('Plovoucí kulička nad Moodlem, PDF, webem i videem. Ťukneš, zakroužkuješ, a Loopnote ti to vysvětlí. Trojitým ťuknutím ji schováš.','A floating bubble over Moodle, PDFs, the web and videos. Tap it, circle something and Loopnote explains it. Triple-tap hides it.')}</p>
+  <div class="row"><button type="button" class="btn ${ABUB.running?'':'primary'}" data-abub="${ABUB.running?'off':'on'}">${ABUB.running?L('Vypnout bublinu','Turn bubble off'):L('Zapnout bublinu','Turn bubble on')}</button></div></div>`}
+async function aStart(){const A=AOV();if(!A)return;try{const c=(await A.canDraw()).value;
+    if(!c){ABUB.waitPerm=true;toast(L('Povol Loopnote „Zobrazovat přes jiné aplikace“ a vrať se zpět.','Allow Loopnote to “Display over other apps”, then come back.'),6000);await A.requestDraw();return}
+    await A.start();ABUB.running=true;toast(L('Bublina je zapnutá. Ťukni na ni kdekoli a zakroužkuj, s čím chceš pomoct.','Bubble is on. Tap it anywhere and circle what you need help with.'),5000);try{S.prefs.aBubble=true;save()}catch(e){}}
+  catch(e){toast(String(e&&e.message||e).includes('denied')?L('Bez povolení snímání obrazovky bublina nefunguje.','The bubble needs permission to capture the screen.'):L('Bublinu se nepodařilo zapnout.','Could not turn the bubble on.'),4500)}aRefresh()}
+async function aStop(){const A=AOV();if(!A)return;try{await A.stop()}catch(e){}ABUB.running=false;try{S.prefs.aBubble=false;save()}catch(e){}aRefresh()}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-abub]');if(!b)return;b.dataset.abub==='on'?aStart():aStop()},true);
+/* výřez z bubliny: vysvětlení přímo v appce, do sešitu až na požádání */
+async function mobileExplain(url){if($('#modalRoot').children.length)closeModal();const hist=[];let last='';
+  const m=openModal(`<div class="modal-h"><h2>${L('Z obrazovky','From your screen')}</h2><button class="iconbtn" type="button" data-x aria-label="${L('Zavřít','Close')}"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="modal-b"><img src="${url}" alt="" style="max-width:100%;max-height:180px;border-radius:10px;display:block;margin:0 auto 12px;box-shadow:0 0 0 1px var(--line)"><div id="mxBody" class="ai-body" style="padding:0"></div>
+    <form id="mxAsk" class="row" style="margin-top:10px"><input id="mxQ" class="sel" style="flex:1" placeholder="${L('Doptej se…','Ask more…')}" autocomplete="off"><button class="btn" type="submit">${L('Poslat','Send')}</button></form></div>
+    <div class="modal-f"><button type="button" class="btn" data-mxspeak>🔊 ${L('Přečíst','Read aloud')}</button><button type="button" class="btn primary" data-mxsave>${L('Uložit do sešitu','Save to notebook')}</button></div>`);
+  const body=$('#mxBody',m);
+  const ask=async q=>{if(q){const qd=document.createElement('div');qd.className='q';qd.textContent=q;body.appendChild(qd)}const th=document.createElement('div');th.className='thinking';th.innerHTML='<span></span><span></span><span></span>'+esc(L('Přemýšlím…','Thinking…'));body.appendChild(th);
+    try{const r=await deskAnswer(url,q,hist);th.remove();const a=document.createElement('div');a.className='a';a.innerHTML=md(r.text||'')+(r.acts||[]).map(x=>`<p class="note">${x.k==='note'?'📝':x.k==='cal'?'📅':'⏱'} ${esc(x.t)}</p>`).join('');body.appendChild(a);
+      if(q)hist.push({role:'user',content:q});hist.push({role:'assistant',content:r.text||''});last=r.text||last;if(!q&&S.prefs.autoRead&&r.text)speak(r.text)}
+    catch(e){th.remove();const er=document.createElement('p');er.className='err';er.textContent=errCopy(e&&e.code);body.appendChild(er)}};
+  ask('');
+  m.addEventListener('submit',e=>{e.preventDefault();const q=$('#mxQ',m).value.trim();if(!q)return;$('#mxQ',m).value='';ask(q)});
+  m.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+    if('x' in b.dataset){stopSpeak();closeModal()}else if('mxspeak' in b.dataset){speaking?stopSpeak():last&&speak(last)}
+    else if('mxsave' in b.dataset){stopSpeak();closeModal();screenToNote(url,hist.map(h=>h.role==='user'?'**'+h.content+'**':h.content).join('\n\n'))}})}
+(function androidInit(){const A=AOV();if(!A)return;
+  try{A.addListener('circle',d=>{if(d&&d.url)mobileExplain(d.url)})}catch(e){}
+  const resume=async()=>{if(document.hidden)return;try{const r=await A.takePending();if(r&&r.url)mobileExplain(r.url)}catch(e){}
+    if(ABUB.waitPerm){try{if((await A.canDraw()).value){ABUB.waitPerm=false;aStart()}}catch(e){}}aRefresh()};
+  document.addEventListener('visibilitychange',resume);setTimeout(resume,1500)})();
 
 /* počítač: kroužek nebo hlas na ploše -> odpověď v okénku na ploše; appka umí zapsat do sešitu, kalendáře i minutku */
 async function explainShot(url,question,history){const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};

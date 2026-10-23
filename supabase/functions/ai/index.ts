@@ -135,6 +135,7 @@ Deno.serve(async (req) => {
   const audio = body.audio && body.audio.data && body.audio.data.length < 12_000_000 ? body.audio : null;
   if (audio) images.push(audio);
   const isStt = body.purpose === "stt";
+  const isWatch = body.purpose === "watch"; // hlídání chyb při psaní – vlastní limit, nepočítá se do dotazů
   // přepis řeči: jen jedna zpráva a jen zvuk (ať se přes něj neobchází limit dotazů)
   if (isStt && (!audio || images.length !== 1 || messages.length !== 1)) return json({ code: "bad_request" }, 400);
   const tier = body.tier ?? "default";
@@ -154,7 +155,7 @@ Deno.serve(async (req) => {
       plus = p?.plan === "plus" && (!p.plan_until || new Date(p.plan_until) > new Date());
     }
   }
-  if (isTts || isStt) {
+  if (isTts || isStt || isWatch) {
     // hlas a přepis řeči mají vlastní (velkorysý) limit a nepočítají se do dotazů
     const { data: n, error } = await sb.rpc("bump_usage", { p_k: "voice:" + key });
     if (!error && typeof n === "number" && n > VOICE_LIMIT * (plus ? 3 : 1)) return json({ code: "usage" }, 429);

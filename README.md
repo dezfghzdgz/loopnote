@@ -8,6 +8,9 @@ Co je v repozitáři:
 | `app/` | Appka Loopnote jako instalovatelná web appka (PWA) – Android tablet, iPad, počítač |
 | `config.js` | Sem doplníš adresu a veřejný klíč Supabase (jediný soubor, který upravuješ) |
 | `supabase/migrations/0001_init.sql` | Tabulky: profily a tarify, přihlášky do bety, limit dotazů |
+| `supabase/migrations/0002_sync.sql` | Synchronizace sešitů, sdílené sešity se spolužáky, doporučení |
+| `supabase/functions/referral` | Pozvi kamaráda → oba týden Plus |
+| `mobile/native/` | Bublina přes ostatní aplikace na Androidu (nativní kód) |
 | `supabase/functions/ai` | AI pro appku – Gemini, volitelně Claude, automatické přepínání |
 | `supabase/functions/checkout` | Spuštění platby (Stripe) |
 | `supabase/functions/stripe-webhook` | Po zaplacení zapne Plus, po zrušení vypne – automaticky |
@@ -28,12 +31,13 @@ Co je v repozitáři:
 
 ## 2. Supabase (databáze, účty, AI)
 1. [supabase.com](https://supabase.com) → **New project** (region Frankfurt / `eu-central-1`).
-2. **SQL Editor → New query** → vlož celý `supabase/migrations/0001_init.sql` → **Run**.
+2. **SQL Editor → New query** → vlož celý `supabase/migrations/0001_init.sql` → **Run**. Pak stejně `supabase/migrations/0002_sync.sql` (synchronizace, sdílení, doporučení). Obojí jde spustit i opakovaně.
 3. **Project Settings → API**: zkopíruj **Project URL** a **anon public** klíč → vlož je do `config.js` na GitHubu.
 4. **Edge Functions → Deploy a new function → Via Editor** – třikrát:
    - název `ai` → vlož `supabase/functions/ai/index.ts` → Deploy
    - název `checkout` → vlož `supabase/functions/checkout/index.ts` → Deploy
    - název `stripe-webhook` → vlož `supabase/functions/stripe-webhook/index.ts` → v nastavení funkce **vypni „Enforce JWT verification“** → Deploy
+   - název `referral` → vlož `supabase/functions/referral/index.ts` → Deploy
 5. **Edge Functions → Secrets** – přidej:
    - `GEMINI_API_KEY` – klíč z [aistudio.google.com](https://aistudio.google.com) → Get API key
    - `SITE_URL` – adresa webu z Vercelu, např. `https://krouzek.vercel.app` (bez lomítka na konci)
@@ -104,7 +108,20 @@ Appky sestaví GitHub sám – nic neinstaluješ.
 - Výchozí je **Gemini Flash** – levné (zhruba haléře za dotaz). Když je nastavený `ANTHROPIC_API_KEY`, nejtěžší úlohy Plus jdou na Clauda. Když jeden poskytovatel neodpoví, funkce automaticky zkusí druhý.
 - Překlad rozhraní do dalších jazyků se dělá jednou na zařízení a nepočítá se do limitu dotazů.
 
+## Účet, synchronizace a sdílení
+- **Nastavení → Účet a synchronizace**: e-mail → kód z e-mailu → sešity, opakování i kalendář jsou na všech zařízeních stejné (data hlídá databáze – každý vidí jen svoje).
+- **Sdílení**: v sešitě ⋯ → Sdílet se spolužáky → pošli odkaz nebo kód. Spolužák se přihlásí a sešit se mu přidá; co kdo napíše, vidí všichni do pár sekund.
+- **Pozvi kamaráda**: v účtu je tvůj kód a odkaz. Kamarád dostane týden Plus hned, ty jakmile si v Loopnote něco zapíše (max. 12×).
+
+## Kreslení, přednášky, zkoušky
+- **Pera**: 7 typů, 6 tlouštěk, krytí, oblíbená pera. **Kreslení** v liště: tvary a kružítko, kbelík, kapátko, pravítko (pero podél hrany kreslí rovně), vrstvy. Nový sešit → „Plátno na kreslení“.
+- **Přednáška**: v sešitě ⋯ → Nahrávka přednášky → ● Nahrávat. Pak „Udělat z přednášky zápis a kartičky“.
+- **Plán přípravy**: u testu v kalendáři „Plán přípravy“ – každý den krátký úkol až do testu.
+- **Hlídání chyb**: když se při psaní zastavíš, pomocník mrkne na nový zápis a při jasné chybě dá na okraj červenou tečku (vypneš v Nastavení → Psaní).
+
+## Android: bublina přes ostatní aplikace
+Nastavení → Bublina přes ostatní aplikace → Zapnout. Android se zeptá na „Zobrazovat přes jiné aplikace“ a na snímání obrazovky. Ťukneš na bublinu, zakroužkuješ a Loopnote to vysvětlí. Appka je podepsaná pořád stejným klíčem (`mobile/debug.keystore`), takže nové verze jdou nainstalovat přes staré. **Jen jednou** (při přechodu z verze před tímhle klíčem) je potřeba starou appku odinstalovat – předtím se přihlas, ať se sešity synchronizují.
+
 ## Co zatím chybí (další kroky)
-- Synchronizace sešitů mezi zařízeními přes Supabase (teď se ukládá v zařízení; v prototypu na claude.ai sync funguje).
-- Bublina mimo appku na **Androidu** (povolení „zobrazovat přes ostatní aplikace“) a rozšíření do Safari pro iPad. Na počítači už funguje.
+- Rozšíření do Safari pro iPad (bublina na iPadu). Na počítači a Androidu už funguje.
 - Nativní appky pro App Store a Google Play. Pozor: v obchodech se digitální předplatné musí platit přes Apple / Google (In-App Purchase), web dál může přes Stripe.
