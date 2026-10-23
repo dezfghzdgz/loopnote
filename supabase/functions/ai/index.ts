@@ -75,27 +75,68 @@ function parseJson(t: string) {
   throw new Error("invalid_json");
 }
 
-async function gemini(messages: Msg[], images: Img[], wantJson: boolean, maxTokens: number) {
-  if (!GEMINI_KEY) throw new Error("no_gemini");
-  const contents = messages.map((m, i) => {
+// rychlost: u běžných dotazů ať model dlouho „nepřemýšlí“ (Gemini 2.5 = thinkingBudget, Gemini 3 = thinkingLevel)
+const noThink = new Set<string>(); // modely, které nastavení přemýšlení odmítly
+function thinking(model: string, fast: boolean) {
+  if (!fast || noThink.has(model)) return {};
+  if (/^gemini-2\.5-(flash|flash-lite)/.test(model)) return { thinkingConfig: { thinkingBudget: 0 } };
+  if (/^gemini-3/.test(model) && /flash/.test(model)) return { thinkingConfig: { thinkingLevel: "low" } };
+  return {};
+}
+function geminiContents(messages: Msg[], images: Img[], wantJson: boolean) {
+  return messages.map((m, i) => {
     const parts: unknown[] = [{ text: m.content + (wantJson && i === messages.length - 1 ? JSON_HINT : "") }];
     if (i === messages.length - 1) for (const im of images) parts.unshift({ inline_data: { mime_type: im.mime, data: im.data } });
     return { role: m.role === "assistant" ? "model" : "user", parts };
   });
+}
+// zkusí modely popořadě; onDelta != null => odpověď se posílá průběžně (stream)
+async function gemini(messages: Msg[], images: Img[], wantJson: boolean, maxTokens: number, fast = true, onDelta?: (t: string) => void) {
+  if (!GEMINI_KEY) throw new Error("no_gemini");
+  const contents = geminiContents(messages, images, wantJson);
   let lastErr = "";
   for (const model of goodModel ? [goodModel, ...GEMINI_MODELS.filter((m) => m !== goodModel)] : GEMINI_MODELS) {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
-      { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: maxTokens, ...(wantJson ? { responseMimeType: "application/json" } : {}) } }) },
-    );
-    const d = await r.json().catch(() => ({}));
-    if (r.status === 404 || (r.status === 400 && /model|not found|not supported/i.test(JSON.stringify(d)))) { lastErr = `gemini ${model}: ${r.status}`; continue; }
-    if (!r.ok) throw new Error(`gemini ${model} ${r.status}: ${(d.error && d.error.message) || JSON.stringify(d).slice(0, 200)}`);
-    goodModel = model;
-    const c = d.candidates?.[0];
-    if (!c || c.finishReason === "SAFETY" || c.finishReason === "PROHIBITED_CONTENT") throw new Error("refused");
-    return (c.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const gc = { maxOutputTokens: maxTokens, ...(wantJson ? { responseMimeType: "application/json" } : {}), ...thinking(model, fast) };
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${onDelta ? "streamGenerateContent?alt=sse&" : "generateContent?"}key=${GEMINI_KEY}`;
+      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contents, generationConfig: gc }) });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        const msg = JSON.stringify(d);
+        if (r.status === 400 && /thinking/i.test(msg) && !noThink.has(model)) { noThink.add(model); continue; } // bez nastavení přemýšlení
+        if (r.status === 404 || (r.status === 400 && /model|not found|not supported/i.test(msg))) { lastErr = `gemini ${model}: ${r.status}`; break; }
+        throw new Error(`gemini ${model} ${r.status}: ${(d.error && d.error.message) || msg.slice(0, 200)}`);
+      }
+      goodModel = model;
+      if (!onDelta) {
+        const d = await r.json().catch(() => ({}));
+        const c = d.candidates?.[0];
+        if (!c || c.finishReason === "SAFETY" || c.finishReason === "PROHIBITED_CONTENT") throw new Error("refused");
+        return (c.content?.parts ?? []).filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
+      }
+      // stream: řádky "data: {...}" od Google → text po kouscích
+      const reader = r.body!.getReader(), dec = new TextDecoder();
+      let buf = "", full = "", refused = false;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+          if (!line.startsWith("data:")) continue;
+          try {
+            const d = JSON.parse(line.slice(5));
+            const c = d.candidates?.[0];
+            if (c && (c.finishReason === "SAFETY" || c.finishReason === "PROHIBITED_CONTENT")) refused = true;
+            const t = (c?.content?.parts ?? []).filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text ?? "").join("");
+            if (t) { full += t; onDelta(t); }
+          } catch { /* neúplný řádek */ }
+        }
+      }
+      if (refused && !full) throw new Error("refused");
+      return full;
+    }
   }
   throw new Error("no Gemini model available (" + lastErr + ")");
 }
@@ -124,7 +165,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ code: "bad_request" }, 405);
 
-  let body: { messages?: Msg[]; images?: Img[]; audio?: Img; tier?: string; json?: boolean; purpose?: string; text?: string; voice?: string };
+  let body: { messages?: Msg[]; images?: Img[]; audio?: Img; tier?: string; json?: boolean; purpose?: string; text?: string; voice?: string; stream?: boolean };
   try { body = await req.json(); } catch { return json({ code: "bad_request" }, 400); }
   const isTts = body.purpose === "tts";
   const messages = (isTts ? [{ role: "user", content: String(body.text || "") }] : (body.messages ?? [])).filter((m) => m && typeof m.content === "string").slice(-12)
@@ -178,10 +219,36 @@ Deno.serve(async (req) => {
   const maxTokens = isStt ? 4000 : 8192;
   // zvuk umí jen Gemini
   const order = audio ? [gemini] : tier === "complex" && plus && CLAUDE_KEY ? [claude, gemini] : [gemini, claude];
+  const fast = tier !== "complex";
+
+  // průběžná odpověď (text se ukazuje hned, jak vzniká)
+  if (body.stream && !wantJson && order[0] === gemini) {
+    const enc = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(ctrl) {
+        const send = (o: unknown) => ctrl.enqueue(enc.encode("data: " + JSON.stringify(o) + "\n\n"));
+        let sent = false;
+        try {
+          await gemini(messages, images, false, maxTokens, fast, (t) => { sent = true; send({ t }); });
+          send({ done: true });
+        } catch (e) {
+          const m = String((e as Error).message || e);
+          // když Gemini selže ještě před prvním slovem, zkusí se Claude (bez streamu)
+          if (!sent && m !== "refused" && CLAUDE_KEY) {
+            try { send({ t: await claude(messages, images, false, maxTokens) }); send({ done: true }); ctrl.close(); return; } catch (e2) { console.error(e2); }
+          }
+          console.error(m);
+          send({ error: m === "refused" ? "refused" : "unavailable", detail: !GEMINI_KEY ? "GEMINI_API_KEY is missing in Supabase → Edge Functions → Secrets" : m.slice(0, 300) });
+        }
+        ctrl.close();
+      },
+    });
+    return new Response(stream, { headers: { ...cors, "content-type": "text/event-stream", "cache-control": "no-cache" } });
+  }
   let lastErr = "";
   for (const fn of order) {
     try {
-      const text = await fn(messages, images, wantJson, maxTokens);
+      const text = fn === gemini ? await gemini(messages, images, wantJson, maxTokens, fast) : await claude(messages, images, wantJson, maxTokens);
       if (wantJson) {
         try { return json({ json: parseJson(text) }); } catch { lastErr = "invalid_json"; continue; }
       }

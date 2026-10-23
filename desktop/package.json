@@ -24,6 +24,7 @@
       "bubble.html",
       "overlay.html",
       "panel.html",
+      "annot.html",
       "build/tray.png",
       "www/**/*"
     ],

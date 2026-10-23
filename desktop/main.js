@@ -1,14 +1,18 @@
 // Loopnote pro počítač: hlavní okno s appkou + jedna plovoucí bublina nad všemi aplikacemi.
 // Klik na bublinu (nebo Ctrl/Cmd+Shift+L) = kroužkuješ přímo na živé obrazovce (nic se nezmrazí).
 // Podržení nebo pravý klik na bublinu (nebo Ctrl/Cmd+Shift+Mezerník) = mluvíš s pomocníkem hlasem.
+// V režimu „jen hlas“ nevyskočí žádné okénko: pomocník vidí obrazovku, mluví a kreslí přímo na ni (kroužek, šipka, podtržení, poznámka).
 // Odpověď vyskočí v malém okénku hned vedle zakroužkovaného místa. Sešit se otevře jen přes „Uložit do sešitu“.
 // Trojklik bublinu schová – vrátí se při dalším otevření Loopnote (ikona, zástupce, lišta u hodin).
 const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, Tray, Menu, nativeImage, session, systemPreferences, Notification } = require("electron");
 const path = require("path");
 
 let win = null, bubble = null, overlay = null, panel = null, tray = null, bubbleOff = false, quitting = false;
-let capDisplay = null, busy = false, lang = { ui: "en", loc: "en-US" }, reqId = 0, talkWant = 0, overlayTimer = null;
+let annot = null, screenTalk = { on: false, sid: 0 }, annotClearT = null;
+let capDisplay = null, busy = false, lang = { ui: "en", loc: "en-US", mode: "screen", subs: true }, reqId = 0, talkWant = 0, overlayTimer = null;
 const ALL_SPACES = { visibleOnFullScreen: true, skipTransformProcessType: true };
+const BS = 72; // velikost bubliny – pevná, nikdy se nemění
+let drag = null;
 const pending = new Map(); // id -> panel webContents
 const WWW = path.join(__dirname, "www", "index.html");
 const PRELOAD = path.join(__dirname, "preload.js");
@@ -43,8 +47,9 @@ function createMain(visible = true) {
 function createBubble() {
   const { workArea } = screen.getPrimaryDisplay();
   bubble = new BrowserWindow({
-    width: 72, height: 72, x: workArea.x + workArea.width - 100, y: workArea.y + Math.round(workArea.height * 0.62),
-    frame: false, transparent: true, resizable: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false,
+    width: BS, height: BS, minWidth: BS, minHeight: BS, maxWidth: BS, maxHeight: BS,
+    x: workArea.x + workArea.width - 100, y: workArea.y + Math.round(workArea.height * 0.62),
+    frame: false, transparent: true, resizable: false, thickFrame: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false,
     focusable: false, fullscreenable: false, maximizable: false, minimizable: false,
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
@@ -52,7 +57,11 @@ function createBubble() {
   bubble.setVisibleOnAllWorkspaces(true, ALL_SPACES);
   bubble.loadFile(path.join(__dirname, "bubble.html"), { query: { ui: lang.ui } });
   bubble.on("closed", () => { bubble = null; });
+  // Windows s měřítkem displeje (125 %, 150 %) umí okno při posunu zvětšit – hned vrátit na pevnou velikost
+  const fix = () => { if (!bubble || bubble.isDestroyed()) return; const b = bubble.getBounds(); if (b.width !== BS || b.height !== BS) bubble.setBounds({ x: b.x, y: b.y, width: BS, height: BS }); };
+  bubble.on("resize", fix); bubble.on("moved", fix); screen.on("display-metrics-changed", fix);
 }
+function placeBubble(x, y) { if (bubble && !bubble.isDestroyed()) bubble.setBounds({ x: Math.round(x), y: Math.round(y), width: BS, height: BS }); }
 
 function showBubble() {
   bubbleOff = false;
@@ -65,7 +74,7 @@ function keepBubbleOnScreen() {
   if (!bubble || bubble.isDestroyed()) return;
   const b = bubble.getBounds(), wa = screen.getDisplayMatching(b).workArea;
   const x = Math.min(Math.max(b.x, wa.x), wa.x + wa.width - b.width), y = Math.min(Math.max(b.y, wa.y), wa.y + wa.height - b.height);
-  if (x !== b.x || y !== b.y) bubble.setPosition(Math.round(x), Math.round(y));
+  if (x !== b.x || y !== b.y || b.width !== BS || b.height !== BS) placeBubble(x, y);
 }
 
 // 1) kroužkování na živé obrazovce: průhledné okno, pod ním všechno běží dál
@@ -92,7 +101,7 @@ function startCircle() {
 }
 
 // 2) výřez: overlay zmizí, vyfotí se jen zakroužkované místo
-async function grab(rect) {
+async function grab(rect, maxSide = 1280) {
   if (process.platform === "darwin" && systemPreferences.getMediaAccessStatus("screen") !== "granted") {
     // bez povolení by se vyfotila jen tapeta; tohle vyvolá systémovou žádost o povolení
     await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } }).catch(() => {});
@@ -116,8 +125,8 @@ async function grab(rect) {
   crop.height = Math.max(1, Math.min(crop.height, ts.height - crop.y));
   let img = t.crop(crop);
   const m = Math.max(crop.width, crop.height);
-  if (m > 1600) img = img.resize({ width: Math.round(crop.width * 1600 / m), quality: "good" });
-  return "data:image/jpeg;base64," + img.toJPEG(88).toString("base64");
+  if (m > maxSide) img = img.resize({ width: Math.round(crop.width * maxSide / m), quality: "good" }); // menší = rychlejší odpověď
+  return "data:image/jpeg;base64," + img.toJPEG(84).toString("base64");
 }
 
 // 3) okénko s odpovědí hned vedle výřezu
@@ -128,15 +137,15 @@ function openPanel(url, rect, talk = false) {
     const bb = bubble && bubble.isVisible() ? bubble.getBounds() : { x: disp.workArea.x + disp.workArea.width - 100, y: disp.workArea.y + disp.workArea.height - 140, width: 72, height: 72 };
     rect = { x: bb.x - disp.bounds.x, y: bb.y - disp.bounds.y - 200, w: bb.width, h: bb.height };
   }
-  const wa = disp.workArea, W = 400, H = 470, gap = 14;
+  const wa = disp.workArea, W = 420, H = 540, gap = 4; // okno má kolem karty 10 px průhledný okraj na stín
   const ax = disp.bounds.x + rect.x, ay = disp.bounds.y + rect.y;
   let x = ax + rect.w + gap;
   if (x + W > wa.x + wa.width) x = ax - W - gap;
   if (x < wa.x) x = Math.min(wa.x + wa.width - W, Math.max(wa.x, ax + rect.w / 2 - W / 2));
   let y = Math.min(Math.max(wa.y, ay), wa.y + wa.height - H);
   panel = new BrowserWindow({
-    x: Math.round(x), y: Math.round(y), width: W, height: H, minWidth: 300, minHeight: 260,
-    frame: false, transparent: false, backgroundColor: "#fbfaf6", alwaysOnTop: true, skipTaskbar: false,
+    x: Math.round(x), y: Math.round(y), width: W, height: H, minWidth: 320, minHeight: 300,
+    frame: false, transparent: true, backgroundColor: "#00000000", hasShadow: false, thickFrame: false, alwaysOnTop: true, skipTaskbar: false,
     resizable: true, maximizable: false, fullscreenable: false, title: "Loopnote",
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
@@ -167,10 +176,59 @@ async function micOk() {
 // rozhovor bez kroužkování: okénko vedle bubliny a rovnou poslouchá
 async function startTalk() {
   if (overlay) overlay.close();
+  if (lang.mode === "screen") return toggleScreenTalk();
   await micOk();
   capDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   openPanel("", null, true);
 }
+
+// --- režim „jen hlas“: bez okénka, pomocník kreslí na obrazovku ---
+function annotWin() {
+  const disp = capDisplay || screen.getPrimaryDisplay();
+  if (annot && !annot.isDestroyed()) {
+    const b = annot.getBounds();
+    if (b.x !== disp.bounds.x || b.y !== disp.bounds.y || b.width !== disp.bounds.width || b.height !== disp.bounds.height) annot.setBounds(disp.bounds);
+    return annot;
+  }
+  annot = new BrowserWindow({
+    x: disp.bounds.x, y: disp.bounds.y, width: disp.bounds.width, height: disp.bounds.height,
+    frame: false, transparent: true, backgroundColor: "#00000000", hasShadow: false, alwaysOnTop: true, skipTaskbar: true,
+    focusable: false, resizable: false, movable: false, enableLargerThanScreen: true, fullscreenable: false, show: false,
+    webPreferences: { preload: PRELOAD, contextIsolation: true },
+  });
+  annot.setIgnoreMouseEvents(true); // myš prochází skrz – kresba nic neblokuje
+  annot.setAlwaysOnTop(true, "screen-saver");
+  annot.setVisibleOnAllWorkspaces(true, ALL_SPACES);
+  annot.loadFile(path.join(__dirname, "annot.html"), { query: { ui: lang.ui } });
+  annot.once("ready-to-show", () => annot && annot.showInactive());
+  annot.on("closed", () => { annot = null; });
+  return annot;
+}
+function toAnnot(msg) {
+  const w = annotWin();
+  const send = () => { if (!w.isDestroyed()) { if (!w.isVisible()) w.showInactive(); if (bubble && !bubble.isDestroyed()) bubble.moveTop(); w.webContents.send("annot", Object.assign({ subs: lang.subs }, msg)); } };
+  if (w.webContents.isLoading()) w.webContents.once("did-finish-load", send); else send();
+}
+async function toggleScreenTalk() {
+  if (screenTalk.on) return stopScreenTalk();
+  if (panel) panel.close();
+  await micOk();
+  const bb = bubble && bubble.isVisible() ? bubble.getBounds() : null;
+  capDisplay = bb ? screen.getDisplayMatching(bb) : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  screenTalk = { on: true, sid: Date.now() };
+  try { globalShortcut.register("Escape", stopScreenTalk); } catch (e) { /* drží jiná appka */ }
+  toAnnot({ st: "listening" });
+  toMain("talk", { on: true, sid: screenTalk.sid, mode: "screen" });
+}
+function stopScreenTalk() {
+  if (!screenTalk.on) return;
+  screenTalk.on = false;
+  try { globalShortcut.unregister("Escape"); } catch (e) { /* nic */ }
+  toMain("talk", { on: false }); toMain("speak", null); bubbleState("");
+  if (annot) toAnnot({ st: "off", clear: "slow" });
+  hideAnnotSoon();
+}
+function hideAnnotSoon() { clearTimeout(annotClearT); annotClearT = setTimeout(() => { if (annot && !annot.isDestroyed() && !screenTalk.on) annot.hide(); }, 3500); }
 
 function askMain(sender, req) {
   const id = ++reqId;
@@ -216,18 +274,43 @@ ipcMain.on("panel-speak", (_e, req) => toMain("speak", req));
 ipcMain.on("panel-open-nb", (_e, req) => { showMain(); toMain("open-nb", req); });
 ipcMain.on("talk-event", (_e, ev) => {
   if (panel && !panel.isDestroyed()) panel.webContents.send("talk-event", ev);
+  if (screenTalk.on && ev && ev.sid === screenTalk.sid) {
+    if (ev.type === "state") {
+      if (ev.st === "off" || ev.st === "error") { screenTalk.on = false; try { globalShortcut.unregister("Escape"); } catch (e) { /* nic */ } toAnnot({ st: ev.st === "error" ? "listening" : "off", text: ev.x || "", clear: "slow" }); if (ev.st === "error") setTimeout(() => { toAnnot({ st: "off" }); hideAnnotSoon(); }, 5000); else hideAnnotSoon(); }
+      else if (ev.st === "listening") toAnnot({ st: "listening" });
+      else if (ev.st === "heard") toAnnot({ st: "heard", text: "„" + (ev.x || "") + "“" });
+      else if (ev.st === "thinking") toAnnot({ st: "thinking" });
+    }
+    if (ev.type === "partial" && ev.text) toAnnot({ st: "thinking", text: ev.text.replace(/\s+/g, " ").slice(-220) });
+    if (ev.type === "answer") toAnnot({ st: "speaking", text: (ev.text || "").replace(/\*\*/g, "").replace(/\s+/g, " ").slice(0, 320) });
+  }
   if (ev && ev.type === "state") bubbleState(["listening", "thinking", "heard", "speaking"].includes(ev.st) ? ev.st : "");
   if (ev && ev.type === "speaking") bubbleState(ev.on ? "speaking" : "");
 });
+ipcMain.handle("screen-shot", async () => {
+  const disp = capDisplay || screen.getPrimaryDisplay();
+  const hadAnnot = annot && !annot.isDestroyed() && annot.isVisible();
+  if (hadAnnot) { annot.setOpacity(0); await wait(60); } // vlastní kresba na snímek nepatří
+  let url = null;
+  try { url = await grab({ x: 0, y: 0, w: disp.bounds.width, h: disp.bounds.height }, 1600); } catch (e) { console.error(e); }
+  if (hadAnnot) annot.setOpacity(1);
+  return url ? { url, w: disp.bounds.width, h: disp.bounds.height } : null;
+});
+ipcMain.on("draw", (_e, d) => {
+  clearTimeout(annotClearT);
+  if (d && d.items && d.items.length) toAnnot({ items: d.items }); else toAnnot({ clear: "slow" });
+});
+ipcMain.on("draw-clear", (_e, slow) => { clearTimeout(annotClearT); annotClearT = setTimeout(() => { if (annot) toAnnot({ clear: "slow" }); }, slow ? 7000 : 0); });
 ipcMain.on("overlay-talk", () => { if (overlay) overlay.close(); setTimeout(startTalk, 80); });
 ipcMain.on("bubble-talk", () => startTalk());
+ipcMain.on("explain-partial", (_e, res) => { const s = pending.get(res.id); if (s && !s.isDestroyed()) s.send("panel-partial", res); });
 ipcMain.on("explain-result", (_e, res) => {
-  if (res && res.ui) lang = { ui: res.ui, loc: res.lang || lang.loc };
+  if (res && res.ui) lang = Object.assign({}, lang, { ui: res.ui, loc: res.lang || lang.loc });
   const s = pending.get(res.id);
   pending.delete(res.id);
   if (s && !s.isDestroyed()) s.send("panel-answer", res);
 });
-ipcMain.on("hello", (_e, l) => { if (l && l.ui) lang = { ui: l.ui, loc: l.loc || lang.loc }; });
+ipcMain.on("hello", (_e, l) => { if (!l || !l.ui) return; const m0 = lang.mode; lang = { ui: l.ui, loc: l.loc || lang.loc, mode: l.mode || lang.mode, subs: l.subs !== false }; if (m0 !== lang.mode) updateTray(); });
 ipcMain.on("panel-save", (_e, d) => {
   if (panel) panel.close();
   showMain();
@@ -237,8 +320,17 @@ ipcMain.on("panel-save", (_e, d) => {
 ipcMain.on("panel-close", () => { if (panel) panel.close(); });
 ipcMain.on("panel-again", () => { if (panel) panel.close(); setTimeout(startCircle, 120); });
 
-ipcMain.on("bubble-move", (_e, dx, dy) => { if (!bubble) return; const [x, y] = bubble.getPosition(); bubble.setPosition(Math.round(x + dx), Math.round(y + dy)); clearTimeout(bubble._kt); bubble._kt = setTimeout(keepBubbleOnScreen, 400); });
-ipcMain.on("bubble-click", () => startCircle());
+// tažení bubliny podle polohy kurzoru (ne sčítáním posunů – to na Windows s měřítkem ujíždí a zvětšuje okno)
+ipcMain.on("bubble-drag", (_e, phase) => {
+  if (!bubble) return;
+  const c = screen.getCursorScreenPoint();
+  if (phase === "start") { const b = bubble.getBounds(); drag = { dx: c.x - b.x, dy: c.y - b.y }; return; }
+  if (phase === "end") { drag = null; keepBubbleOnScreen(); return; }
+  if (!drag) return;
+  placeBubble(c.x - drag.dx, c.y - drag.dy);
+});
+ipcMain.on("bubble-move", (_e, dx, dy) => { if (!bubble) return; const b = bubble.getBounds(); placeBubble(b.x + dx, b.y + dy); clearTimeout(bubble._kt); bubble._kt = setTimeout(keepBubbleOnScreen, 400); });
+ipcMain.on("bubble-click", () => { if (screenTalk.on) return stopScreenTalk(); startCircle(); });
 ipcMain.on("bubble-off", () => {
   bubbleOff = true; if (bubble) bubble.hide();
   const cs = lang.ui === "cs";
@@ -249,16 +341,25 @@ function createTray() {
   const img = nativeImage.createFromPath(path.join(__dirname, "build", "tray.png")).resize({ width: 18, height: 18 });
   tray = new Tray(img);
   tray.setToolTip("Loopnote");
+  updateTray();
+  tray.on("click", () => { showBubble(); showMain(); });
+}
+function updateTray() {
+  if (!tray) return;
+  const cs = lang.ui === "cs";
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Open Loopnote", click: () => { showBubble(); showMain(); } },
     { label: "Circle on screen (Ctrl+Shift+L)", click: () => startCircle() },
     { label: "Talk (Ctrl+Shift+Space)", click: () => startTalk() },
     { label: "Show bubble", click: showBubble },
     { type: "separator" },
+    { label: cs ? "Mluvení: jen hlas a kreslení na obrazovku" : "Talking: voice + drawing on screen", type: "radio", checked: lang.mode === "screen", click: () => setMode("screen") },
+    { label: cs ? "Mluvení: s okénkem" : "Talking: with a panel", type: "radio", checked: lang.mode !== "screen", click: () => setMode("panel") },
+    { type: "separator" },
     { label: "Quit", click: () => { quitting = true; app.quit(); } },
   ]));
-  tray.on("click", () => { showBubble(); showMain(); });
 }
+function setMode(m) { lang.mode = m; toMain("set-pref", { deskTalk: m }); updateTray(); }
 
 app.whenReady().then(() => {
   allowMedia();

@@ -124,7 +124,7 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .book .band{position:absolute;top:0;bottom:0;right:17px;width:7px;background:linear-gradient(90deg,#111,#3a3a3a 45%,#0c0c0c);opacity:.85;box-shadow:1px 0 2px rgba(0,0,0,.35)}
 .book .label{position:absolute;left:25px;right:36px;top:20%;background:#fbfaf6;color:#1d2321;border-radius:4px;padding:10px 10px 9px;
   background-image:repeating-linear-gradient(180deg,transparent 0 17px,rgba(40,70,110,.14) 17px 18px);box-shadow:0 1px 2px rgba(0,0,0,.2)}
-.book .label b{display:block;font-family:var(--f-hand);font-weight:700;font-size:17px;line-height:1.1;overflow-wrap:anywhere}
+.book .label b{display:block;font-family:var(--f-hand);font-weight:700;font-size:17px;line-height:1.1;overflow-wrap:break-word;hyphens:auto}
 .book .label small{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#6b7370;margin-top:4px}
 .sheetprev{position:relative;width:100%;aspect-ratio:800/1130;border-radius:3px;overflow:hidden;background:#fff;
   box-shadow:0 0 0 1px rgba(0,0,0,.08),3px 3px 0 -1px #f5f3ee,3px 3px 0 0 rgba(0,0,0,.12),0 16px 26px -14px var(--shadow);transition:transform .18s ease}
@@ -768,14 +768,25 @@ async function startCheckout(plan,btn){const tok=await accToken();if(!tok)return
   catch(e){toast(L('Platbu se nepodařilo spustit. Zkus to za chvíli.','Could not start the payment. Try again in a moment.'),4000);if(btn){btn.disabled=false;btn.textContent=L('Zaplatit','Pay')}return true}}
 let AI_DETAIL='';
 function apiSample(){let dev='x';try{dev=localStorage.getItem('krouzek-dev');if(!dev){dev=uid()+uid();localStorage.setItem('krouzek-dev',dev)}}catch(e){}
-  const b64=b=>new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res({mime:b.type||'image/jpeg',data:String(fr.result).split(',')[1]});fr.onerror=rej;fr.readAsDataURL(b)});
+  // velké obrázky před odesláním zmenšit (rychlejší odpověď, AI je stejně čte v menším rozlišení)
+  const shrink=async b=>{try{if(!/^image\//.test(b.type||'image/')||b.size<250e3)return b;const bm=await createImageBitmap(b);const k=Math.min(1,1280/Math.max(bm.width,bm.height));if(k>=1&&b.size<900e3){bm.close&&bm.close();return b}
+      const cv=document.createElement('canvas');cv.width=Math.round(bm.width*k);cv.height=Math.round(bm.height*k);const c=cv.getContext('2d');c.fillStyle='#fff';c.fillRect(0,0,cv.width,cv.height);c.drawImage(bm,0,0,cv.width,cv.height);bm.close&&bm.close();
+      return await new Promise(r=>cv.toBlob(x=>r(x||b),'image/jpeg',.85))}catch(e){return b}};
+  const b64=b=>shrink(b).then(b=>new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res({mime:b.type||'image/jpeg',data:String(fr.result).split(',')[1]});fr.onerror=rej;fr.readAsDataURL(b)}));
   async function call(input,opts,json){opts=opts||{};const messages=typeof input==='string'?[{role:'user',content:input}]:input.map(m=>({role:m.role,content:String(m.content)}));
     const imgs=opts.images?(await Promise.all(opts.images)).filter(Boolean):[];const images=await Promise.all(imgs.map(b64));const tok=await accToken();let r;
     try{r=await fetch(KCFG.supabaseUrl+'/functions/v1/ai',{method:'POST',signal:opts.signal,headers:{'content-type':'application/json',apikey:KCFG.anonKey,authorization:'Bearer '+(tok||KCFG.anonKey),'x-device':dev},
-      body:JSON.stringify({messages,images,tier:opts.modelTier||'default',json,purpose:opts.purpose||'',lang:LANG()})})}
+      body:JSON.stringify({messages,images,tier:opts.modelTier||'default',json,purpose:opts.purpose||'',lang:LANG(),stream:!json&&!!opts.onText})})}
     catch(e){throw {code:e&&e.name==='AbortError'?'cancelled':'offline'}}
+    // průběžná odpověď: text se ukazuje, jak vzniká
+    if(r.ok&&/event-stream/.test(r.headers.get('content-type')||'')){const rd=r.body.getReader(),dec=new TextDecoder();let buf='',text='';
+      try{for(;;){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
+        while((i=buf.indexOf('\n\n'))>=0){const ev=buf.slice(0,i);buf=buf.slice(i+2);const line=ev.split('\n').find(l=>l.startsWith('data:'));if(!line)continue;let o;try{o=JSON.parse(line.slice(5))}catch(e){continue}
+          if(o.error){AI_DETAIL=o.detail||'';throw {code:o.error,text}}if(o.t){text+=o.t;try{opts.onText({text})}catch(e){}}}}}
+      catch(e){if(e&&e.code)throw e;throw {code:opts.signal&&opts.signal.aborted?'cancelled':'offline',text}}
+      return {text,streamed:true}}
     const d=await r.json().catch(()=>({}));if(!r.ok){AI_DETAIL=d.detail||d.message||d.msg||d.error||('HTTP '+r.status);throw {code:d.code||'unavailable'}}return d}
-  const sample=async(input,opts)=>{const d=await call(input,opts,false);if(opts&&opts.onText)opts.onText({text:d.text||''});return {text:d.text||''}};
+  const sample=async(input,opts)=>{const d=await call(input,opts,false);if(opts&&opts.onText&&!d.streamed)opts.onText({text:d.text||''});return {text:d.text||''}};
   sample.json=async(input,opts)=>{const d=await call(input,opts,true);return d.json};return sample}
 const SAMPLE_P=HAS_CLAUDE?window.claude.use('sample').catch(()=>null):(HAS_API?Promise.resolve(apiSample()):Promise.resolve(null));
 const DL_P=HAS_CLAUDE?window.claude.use('downloads').catch(()=>null):Promise.resolve({save:async({filename,data})=>{const blob=data instanceof Blob?data:new Blob([data],{type:'application/octet-stream'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},3000)}});
@@ -939,7 +950,7 @@ function paperBg(type,color,s=1){const p=PAPERS[color]||PAPERS.white,L=p.line;le
   else if(type==='dots')g=`radial-gradient(circle,${L} 1.1px,transparent 1.4px) 0 0/${k}px ${k}px,`;
   return `background:${g}${p.bg}`}
 function coverStyle(c){return `--c:${c.color};--pat:${(PATS[c.pattern]||PATS.plain).css}`}
-function bookHTML(nb){return `<div class="book" style="${coverStyle(nb.cover)}"><span class="spine"></span><span class="label"><b>${esc(nb.title||'Bez názvu')}</b>${nb.subject?`<small>${esc(nb.subject)}</small>`:''}</span><span class="band"></span></div>`}
+function bookHTML(nb){return `<div class="book" style="${coverStyle(nb.cover)}"><span class="spine"></span><span class="label"><b${(()=>{const w=Math.max(...String(nb.title||'').split(/\s+/).map(x=>x.length));return w>12?' style="font-size:12.5px"':w>9?' style="font-size:14.5px"':''})()}>${esc(nb.title||'Bez názvu')}</b>${nb.subject?`<small>${esc(nb.subject)}</small>`:''}</span><span class="band"></span></div>`}
 function meterHTML(n){return `<span class="meter">${[0,1,2,3].map(i=>`<i class="${i<=n?'on':''}"></i>`).join('')}</span>`}
 
 /* ---------- kreslení na plátno ---------- */
@@ -1327,8 +1338,8 @@ function openNotebook(id,pageIdx){const nb=S.notebooks.find(n=>n.id===id);if(!nb
   if(!S.prefs.hinted){S.prefs.hinted=true;save();setTimeout(()=>toast('Tip: ťukni na plovoucí kuličku a zakroužkuj, s čím chceš pomoct. Kuličku přesuneš tažením.',5200),500)}}
 function closeEditor(silent){if(WATCH){WATCH.marks=[];WATCH.since.clear();clearTimeout(WATCH.t)}closeAI();clearSel();commitText();ED=null;if(silent)return;show('lib');renderLib();runSearch($('#search').value)}
 $('#edMenu').onclick=e=>{if(!ED)return;const z=Math.round(ED.zoom*100);
-  openPop(e.currentTarget,[['notes','Zeptej se svých zápisků'],['learn','Učení a zkoušky'],['practice','Procvičit z tohoto sešitu'],['rec','Nahrávka přednášky'],['share',ED.nb.shared?'Sdíleno se spolužáky':'Sdílet se spolužáky'],['photo','Ofotit sešit → text'],['paper','Papír a vzhled'],['deck',L('Prezentace z poznámek','Presentation from notes')],['pdf','Exportovat PDF']],k=>{if(k==='deck')return deckDialog(ED.nb.id);
-    if(k==='notes')openNotes();else if(k==='learn')learnHub(ED.nb.id);else if(k==='rec')openRecBar();else if(k==='share')shareDialog(ED.nb);else if(k==='practice')practiceDialog(ED.nb.id);else if(k==='photo')startPhotoScan(ED.nb.id);else if(k==='paper')nbDialog(ED.nb);else if(k==='pdf')exportPDF(ED.nb,null)},
+  openPop(e.currentTarget,[['notes','Zeptej se svých zápisků'],['learn','Učení a zkoušky'],['practice','Procvičit z tohoto sešitu'],...(navigator.mediaDevices&&window.MediaRecorder?[['recnow',lecOn()?L('■ Zastavit nahrávání','■ Stop recording'):L('● Nahrávat přednášku','● Record lecture')]]:[]),['rec',L('Nahrávky a zápis z přednášky','Recordings & lecture notes')],['share',ED.nb.shared?'Sdíleno se spolužáky':'Sdílet se spolužáky'],['photo','Ofotit sešit → text'],['paper','Papír a vzhled'],['deck',L('Prezentace z poznámek','Presentation from notes')],['pdf','Exportovat PDF']],k=>{if(k==='deck')return deckDialog(ED.nb.id);
+    if(k==='notes')openNotes();else if(k==='learn')learnHub(ED.nb.id);else if(k==='rec')openRecBar();else if(k==='recnow'){openRecBar();lecOn()?lecStop():lecStart()}else if(k==='share')shareDialog(ED.nb);else if(k==='practice')practiceDialog(ED.nb.id);else if(k==='photo')startPhotoScan(ED.nb.id);else if(k==='paper')nbDialog(ED.nb);else if(k==='pdf')exportPDF(ED.nb,null)},
     `<div class="pop-zoom"><span>Přiblížení</span><button type="button" data-k="zout" data-keep="1" aria-label="Oddálit">−</button><b id="zoomLbl">${z} %</b><button type="button" data-k="zin" data-keep="1" aria-label="Přiblížit">+</button></div>`);
   popEl.addEventListener('click',ev=>{const b=ev.target.closest('[data-k]');if(!b)return;if(b.dataset.k==='zin')setZoom(ED.zoom*1.25);if(b.dataset.k==='zout')setZoom(ED.zoom/1.25)})};
 function updateZoom(){const l=$('#zoomLbl');if(l&&ED)l.textContent=Math.round(ED.zoom*100)+' %'}
@@ -1434,7 +1445,7 @@ function noteHeight(objs){let a=1e9,b=-1e9;for(const o of objs){const q=bboxOf(o
 function appendNote(nb,data,snip){let pg=nb.pages[nb.pages.length-1];let maxY=0;for(const q of pg.objs){const b=bboxOf(q);maxY=Math.max(maxY,b.y+b.h)}
   let start=pg.objs.length?maxY+60:noteMetrics(nb).top;
   if(nb.layout==='pages'&&pg.objs.length&&start>pg.h-260){pg={id:uid(),h:H,objs:[],rev:0,ocr:'',ocrRev:0};nb.pages.push(pg);start=noteMetrics(nb).top}
-  const n=buildNote(nb,data,60,start,W-120,snip);pg.objs.push(...n.objs);const hb=noteHeight(pg.objs).bottom;if(hb>pg.h-40)pg.h=Math.ceil(hb+120);pg.rev=(pg.rev||0)+1;touch(nb);return nb.pages.indexOf(pg)}
+  const n=buildNote(nb,data,60,start,W-120,snip);pg.objs.push(...n.objs);pg.mod=Date.now();const hb=noteHeight(pg.objs).bottom;if(hb>pg.h-40)pg.h=Math.ceil(hb+120);pg.rev=(pg.rev||0)+1;touch(nb);return nb.pages.indexOf(pg)}
 function notePreview(nb,data,snip){const n=buildNote(nb,data,40,noteMetrics(nb).top,W-80,snip);const hb=Math.max(300,noteHeight(n.objs).bottom+50);const k=.6,cv=document.createElement('canvas');cv.width=Math.round(W*k);cv.height=Math.round(hb*k);
   const c=cv.getContext('2d');c.scale(k,k);renderPage(c,nb,{h:hb,objs:n.objs});return cv}
 
@@ -1578,7 +1589,7 @@ function pageOff(a,b){return (b.wrap.getBoundingClientRect().top-a.wrap.getBound
 function lassoRenderAll(){if(!drag||drag.mode!=='lasso')return;let lo=1e9,hi=-1e9;for(const p of drag.pts){if(p[1]<lo)lo=p[1];if(p[1]>hi)hi=p[1]}
   for(const v of ED.views){if(v===drag.v)continue;const off=pageOff(drag.v,v);if(hi>=off-20&&lo<=off+v.pg.h+20||v.lassoShown){v.lassoShown=hi>=off-20&&lo<=off+v.pg.h+20;liveRender(v)}}}
 $('#undoBtn').onclick=()=>ED&&restore(ED.hist,ED.redo);$('#redoBtn').onclick=()=>ED&&restore(ED.redo,ED.hist);
-function changed(v){if(ED&&ED.nb.layers&&ED.nb.layers.length>1)for(const o of v.pg.objs)if(o.ly==null)o.ly=ED.layer;v.pg.rev=(v.pg.rev||0)+1;if(ED)ED.nb.edited=true;redrawBase(v);liveRender(v);touch(ED.nb);maybeExtend(v)}
+function changed(v){v.pg.mod=Date.now();if(ED&&ED.nb.layers&&ED.nb.layers.length>1)for(const o of v.pg.objs)if(o.ly==null)o.ly=ED.layer;v.pg.rev=(v.pg.rev||0)+1;if(ED)ED.nb.edited=true;redrawBase(v);liveRender(v);touch(ED.nb);maybeExtend(v)}
 function maybeExtend(v){if(ED.nb.layout!=='endless')return;let maxY=0;for(const o of v.pg.objs){const b=bboxOf(o);maxY=Math.max(maxY,b.y+b.h)}if(maxY>v.pg.h-320){v.pg.h+=700;sizeView(v);redrawBase(v);liveRender(v)}}
 
 /* ---------- ukazatel ---------- */
@@ -1880,7 +1891,7 @@ function styleGuide(){const p=S.profile,y=parseInt(p.year)||0,t=p.schoolType;
     return `Píšeš středoškolákovi, který chodí na ${m[t]||'střední školu'}${y?`, ${y}. ročník`:''}. Nejvýš 110 slov.`}
   const m={'Technická':'technickou VŠ: formálně a přesně, definice, věty a značení jako na přednáškách','Ekonomická':'ekonomickou VŠ: přesně, ale s důrazem na intuici a ekonomické aplikace','Přírodovědná':'přírodovědeckou fakultu: formálně, s důrazem na pochopení principu','Lékařská':'lékařskou fakultu: stručně, prakticky, s vazbou na biologii a medicínu','Pedagogická':'pedagogickou fakultu: srozumitelně, s ohledem na to, jak to vysvětlit dětem','Humanitní':'humanitní obor: srozumitelně, bez zbytečného formalismu'};
   return `Píšeš vysokoškolákovi${t?`, který studuje ${m[t]||t}`:''}${y?`, ${y}. ročník`:''}. Používej přesné pojmy a značení jako na přednáškách. Nejvýš 140 slov (u Celého postupu víc).`}
-function stripAg(t){return String(t).replace(/\[\[ZAPIS[\s\S]*?(\[\[\/ZAPIS\]\]|$)/g,'').replace(/\[\[\/ZAPIS\]\]/g,'').replace(/\[\[(KALENDAR|TIMER)[\s\S]*?(\]\]|$)/g,'').replace(/\[\[?[KT]?[A-Z]*\s*$/,'')}
+function stripAg(t){return String(t).replace(/\[\[ZAPIS[\s\S]*?(\[\[\/ZAPIS\]\]|$)/g,'').replace(/\[\[\/ZAPIS\]\]/g,'').replace(/\[\[(KALENDAR|TIMER|KRESLI)[\s\S]*?(\]\]|$)/g,'').replace(/\[\[?[KT]?[A-Z]*\s*$/,'')}
 function cleanAns(t,streaming){t=stripAg(t).replace(/^\s*CHYBA:.*$/gim,'');if(streaming)t=t.replace(/\n\s*C(H(Y(B(A(:[^\n]*)?)?)?)?)?\s*$/,'');return t.trim()}
 function inl(s){return esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')}
 function md(t){const maths=[];t=stripAg(t).replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g,(m,a,b)=>{maths.push([a||b,true]);return `\u0001${maths.length-1}\u0001`})
@@ -1985,8 +1996,8 @@ async function runOcr(){const sample=await SAMPLE_P;if(!sample){toast('Čtení r
     catch(e){if(e&&(e.code==='not_granted'||e.code==='rate_limited'||e.code==='sampling_disabled')){toast(errCopy(e.code),4000);break}}
     NOTES.ocr.done++;renderOcrBar()}
   NOTES.ocr=null;renderOcrBar();runSearch($('#search').value)}
-function knowledge(only){let s='';S.notebooks.forEach((nb,i)=>{if(only&&!only.has(nb.id))return;s+=`\n### Sešit ${i+1}: ${nb.title}${nb.subject?' ('+nb.subject+')':''}\n`;
-  nb.pages.forEach((pg,j)=>{const typed=pageTyped(pg),ocr=pg.ocr&&pg.ocr.trim();const t=[typed,ocr&&('[přečteno z rukopisu]\n'+ocr)].filter(Boolean).join('\n');if(t.trim())s+=`[s:${i+1}:${j+1}]\n${t}\n\n`})});return s.slice(0,150000)}
+function knowledge(only,since){let s='';S.notebooks.forEach((nb,i)=>{if(only&&!only.has(nb.id))return;s+=`\n### Sešit ${i+1}: ${nb.title}${nb.subject?' ('+nb.subject+')':''}\n`;
+  nb.pages.forEach((pg,j)=>{if(since&&(pg.mod||nb.updated||0)<since)return;const typed=pageTyped(pg),ocr=pg.ocr&&pg.ocr.trim();const t=[typed,ocr&&('[přečteno z rukopisu]\n'+ocr)].filter(Boolean).join('\n');if(t.trim())s+=`[s:${i+1}:${j+1}]\n${t}\n\n`})});return s.slice(0,150000)}
 function notesPrompt(q){return `${TEACHER()}
 Jsi pomocník v aplikaci Loopnote a znáš všechny studentovy zápisky. ${profileCtx(null)}
 JAK MLUVIT: ${styleGuide()}
@@ -2063,15 +2074,30 @@ function PR_DEMO_(){const E=LANG()!=='cs';return {title:E?'Derivatives and limit
   {type:'choice',q:E?'What is the derivative of a product $(u \\cdot v)\'$?':'Jaká je derivace součinu $(u \\cdot v)\'$?',options:['$u\' \\cdot v\'$','$u\'v + uv\'$','$u\'v - uv\'$','$\\frac{u\'}{v\'}$'],correct:1,why:E?'The product rule is a sum: differentiate one function and keep the other, then swap.':'Derivace součinu je součet: derivuješ vždy jednu funkci a druhou opíšeš.',src:'[s:1:1]'},
   {type:'choice',q:(E?'What is ':'Kolik je ')+'$$\\lim_{x \\to 0} \\frac{\\sin x}{x}$$',options:['$0$','$1$','$\\infty$',E?'the limit does not exist':'limita neexistuje'],correct:1,why:E?'It is a standard limit you have in your notes.':'Je to základní limita, kterou máš zapsanou v sešitě.',src:'[s:1:2]'},
   {type:'open',q:(E?'Differentiate ':'Zderivuj ')+'$f(x) = x^3 \\cdot \\cos x$.',answer:'$f\'(x) = 3x^2\\cos x - x^3\\sin x$',steps:['$u = x^3$, $u\' = 3x^2$','$v = \\cos x$, $v\' = -\\sin x$','$f\'(x) = 3x^2\\cos x + x^3 \\cdot (-\\sin x)$'],src:'[s:1:1]'}]}}
-function practiceDialog(nbId,topic){const ids=nbId?[nbId]:S.notebooks.map(n=>n.id);
-  PR={topic:topic||null,src:new Set(ids),kind:'quiz',n:5,diff:'normal',stage:'setup',data:null,i:0,res:[],picked:null,shown:false,check:null,ctl:null,hist:[],view:null,tries:0};
+function pagesSince(ids,since){let n=0;for(const nb of S.notebooks){if(!ids.has(nb.id))continue;for(const pg of nb.pages)if(!since||(pg.mod||nb.updated||0)>=since)n++}return n}
+function localTopics(ids){const out=new Map(),add=(t,w)=>{t=String(t||'').replace(/^[#\d.)\s–-]+/,'').trim();if(t.length<3||t.length>40)return;const k=norm(t);out.set(k,{t,w:(out.get(k)?.w||0)+w})};
+  for(const nb of S.notebooks){if(!ids.has(nb.id))continue;for(const t of (nb.topics||[]))add(t,5);
+    for(const pg of nb.pages)for(const o of pg.objs)if(o.type==='text'&&o.size>=30&&o.text&&!o.text.includes('\n'))add(o.text,2)}
+  for(const c of (S.review&&S.review.cards||[]))if(ids.has(c.nbId))add(c.topic,1);
+  return [...out.values()].sort((a,b)=>b.w-a.w).slice(0,24).map(x=>x.t)}
+async function findTopics(btn){const P=PR;if(!P)return;const sample=await SAMPLE_P;if(!sample){toast(L('Kapitoly umí najít AI v appce.','Finding chapters needs the AI.'));return}if(usageLeft()<=0){plansDialog();return}
+  btn.disabled=true;btn.textContent=L('Hledám kapitoly…','Finding chapters…');
+  try{const r=await sample.json(`Níže jsou studentovy zápisky. Rozděl látku na kapitoly/témata, ke kterým se dá procvičovat (např. „Matice“, „Derivace“, „Limity“). U každého sešitu 3–10 krátkých názvů (1–3 slova) v jazyce zápisků, v pořadí, jak jdou v sešitě.
+Odpověz jen JSON: {"notebooks":[{"n":číslo sešitu,"topics":["…"]}]}
+
+ZÁPISKY:
+${knowledge(P.src,P.since)}`,{modelTier:'quick',purpose:'ui'});
+    for(const x of (r&&r.notebooks)||[]){const nb=S.notebooks[(+x.n||0)-1];if(nb&&Array.isArray(x.topics)){nb.topics=x.topics.map(String).slice(0,12);touch(nb)}}save()}
+  catch(e){toast(errCopy(e&&e.code),4000)}if(PR===P)P.render()}
+function practiceDialog(nbId,topic){const pp=S.prefs.prac||{};const ids=nbId?[nbId]:(pp.src&&pp.src.filter(id=>S.notebooks.some(n=>n.id===id)).length?pp.src.filter(id=>S.notebooks.some(n=>n.id===id)):S.notebooks.map(n=>n.id));
+  PR={topic:topic||null,topics:new Set(topic?[topic]:[]),days:nbId?0:(pp.days||0),since:0,src:new Set(ids),kind:pp.kind||'quiz',n:pp.n||5,diff:pp.diff||'normal',stage:'setup',data:null,i:0,res:[],picked:null,shown:false,check:null,ctl:null,hist:[],view:null,tries:0};
   const m=openModal(`<div class="modal-h"><h2>Procvičování</h2><button class="iconbtn" type="button" data-x aria-label="Zavřít"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><div class="modal-b" id="prBody"></div>`,()=>{if(PR&&PR.ctl)PR.ctl.abort();PR=null});
-  m.style.maxWidth='640px';PR.render=()=>renderPractice(m);PR.render();
+  m.style.maxWidth='640px';PR.since=PR.days?Date.now()-PR.days*864e5:0;PR.render=()=>renderPractice(m);PR.render();
   m.addEventListener('click',e=>{const b=e.target.closest('button');if(!b||!PR)return;const d=b.dataset;
     if('x' in d)return closeModal();
     if(d.cite){const nb=S.notebooks[+d.cite.split(':')[0]-1];if(nb){closeModal();openNotebook(nb.id,+d.cite.split(':')[1]-1)}return}
-    if(d.src){PR.src.has(d.src)?PR.src.delete(d.src):PR.src.add(d.src)}else if(d.kind)PR.kind=d.kind;else if(d.n)PR.n=+d.n;else if(d.diff)PR.diff=d.diff;
-    else if('go' in d)return genPractice();else if('opt' in d){if(PR.picked==null){PR.picked=+d.opt;PR.res[PR.i]=PR.picked===PR.data.questions[PR.i].correct}}
+    if(d.src){PR.src.has(d.src)?PR.src.delete(d.src):PR.src.add(d.src);PR.topics.clear()}else if(d.days!=null){PR.days=+d.days;PR.since=PR.days?Date.now()-PR.days*864e5:0}else if(d.ptopic){PR.topics.has(d.ptopic)?PR.topics.delete(d.ptopic):PR.topics.add(d.ptopic)}else if('ftopics' in d){findTopics(b);return}else if(d.kind)PR.kind=d.kind;else if(d.n)PR.n=+d.n;else if(d.diff)PR.diff=d.diff;
+    else if('go' in d){S.prefs.prac={src:[...PR.src],days:PR.days,kind:PR.kind,n:PR.n,diff:PR.diff};save();return genPractice()}else if('opt' in d){if(PR.picked==null){PR.picked=+d.opt;PR.res[PR.i]=PR.picked===PR.data.questions[PR.i].correct}}
     else if('reveal' in d){PR.shown=true;if(PR.res[PR.i]!==true)PR.res[PR.i]=false}else if('self' in d){next()}else if('check' in d)return checkOpen();
     else if(d.view!=null){const j=+d.view;PR.view=(j===PR.i&&PR.stage!=='done')?null:j}else if('back' in d){PR.view=null}
     else if('next' in d)return next();else if('again' in d){PR.stage='setup';PR.data=null}else if('insert' in d)return insertPractice();else return;
@@ -2083,9 +2109,13 @@ function citeBtn(src){const m=/\[s:(\d+):(\d+)\]/.exec(src||'');if(!m)return '';
 function renderPractice(m){const b=$('#prBody',m);if(!b)return;const P=PR;
   if(P.stage==='setup'){b.innerHTML=`<p class="hello" style="margin:0">Pomocník vymyslí nové úlohy podle toho, co máš v sešitech, na tvojí úrovni.</p>
     <div class="group"><span class="eyebrow">Z čeho</span><div class="row">${S.notebooks.map(n=>`<button type="button" class="pill" data-src="${n.id}" aria-pressed="${P.src.has(n.id)}">${esc(n.title)}</button>`).join('')}</div></div>
+    <div class="group"><span class="eyebrow">${L('Za jakou dobu','From when')}</span><div class="row">${[[0,L('Všechno','Everything')],[7,L('Posledních 7 dní','Last 7 days')],[14,L('Posledních 14 dní','Last 14 days')],[30,L('Poslední měsíc','Last month')]].map(([k,n])=>`<button type="button" class="pill" data-days="${k}" aria-pressed="${P.days===k}">${n}</button>`).join('')}</div>
+      ${P.days?`<p class="fine" style="margin:0">${(()=>{const n=pagesSince(P.src,P.since);return n?L(`Upravených stránek: ${n}`,`Pages edited: ${n}`):L('Za tuhle dobu jsi v těchto sešitech nic nepsal.','Nothing written in these notebooks in that period.')})()}</p>`:''}</div>
+    <div class="group"><span class="eyebrow">${L('Kapitoly (nepovinné)','Chapters (optional)')}</span><div class="row">${(()=>{const t=localTopics(P.src);if(P.topic&&!t.includes(P.topic))t.unshift(P.topic);return t.map(x=>`<button type="button" class="pill" data-ptopic="${esc(x)}" aria-pressed="${P.topics.has(x)}">${esc(x)}</button>`).join('')})()}<button type="button" class="pill" data-ftopics>✨ ${L('Najít kapitoly','Find chapters')}</button></div>
+      <p class="fine" style="margin:0">${P.topics.size?L('Úlohy budou jen z vybraných kapitol.','Questions only from the chosen chapters.'):L('Nic nevybráno = ze všeho.','Nothing selected = everything.')}</p></div>
     <div class="group"><span class="eyebrow">Co chceš</span><div class="opts c2"><button type="button" class="opt" data-kind="quiz" aria-pressed="${P.kind==='quiz'}"><b>Test</b><small>Otázky s možnostmi a hned vidíš, jak ti to jde.</small></button><button type="button" class="opt" data-kind="drill" aria-pressed="${P.kind==='drill'}"><b>Příklady na procvičení</b><small>Počítáš sám, pak si ukážeš postup krok za krokem.</small></button></div></div>
     <div class="group"><span class="eyebrow">Kolik a jak těžké</span><div class="row">${[3,5,10].map(n=>`<button type="button" class="pill" data-n="${n}" aria-pressed="${P.n===n}">${n} úloh</button>`).join('')}<span class="sep"></span>${Object.entries(DIFFS).map(([k,v])=>`<button type="button" class="pill" data-diff="${k}" aria-pressed="${P.diff===k}">${v}</button>`).join('')}</div></div>
-    <div class="row"><button type="button" class="btn primary" data-go ${P.src.size?'':'disabled'}>Vytvořit ${P.kind==='quiz'?'test':'příklady'}</button></div>`;return}
+    <div class="row"><button type="button" class="btn primary" data-go ${P.src.size&&(!P.days||pagesSince(P.src,P.since))?'':'disabled'}>Vytvořit ${P.kind==='quiz'?'test':'příklady'}</button></div>`;return}
   if(P.stage==='loading'){b.innerHTML=`<div class="thinking"><span></span><span></span><span></span>Procházím tvoje zápisky a vymýšlím úlohy…</div>${P.err?`<p class="err">${esc(P.err)}</p><div class="row"><button type="button" class="btn" data-again>Zpět</button></div>`:''}`;return}
   const Q=P.data.questions;
   const dots=(cur)=>`<div class="qprog nav">${Q.map((_,j)=>{const past=j<P.i||P.stage==='done';return `<button type="button" ${past||j===P.i?`data-view="${j}"`:'disabled'} aria-label="${L('Otázka','Question')} ${j+1}" class="${past?(P.res[j]?'ok':'bad'):j===P.i?'cur':''} ${cur===j?'sel':''}"></button>`}).join('')}</div>`;
@@ -2112,7 +2142,7 @@ async function genPractice(){const P=PR;P.stage='loading';P.err=null;P.render();
   const prompt=`${TEACHER()}
 Jsi pomocník v aplikaci Loopnote. ${profileCtx(null)}
 JAK MLUVIT: ${styleGuide()}
-Připrav studentovi ${kind} ze zápisků níže: přesně ${P.n} úloh, obtížnost: ${DIFFS[P.diff]}.${P.topic?` Zaměř se hlavně na téma „${P.topic}“, ve kterém je student zatím slabý.`:''} Každá úloha má "topic": krátký název tématu (2–3 slova), stejný pro úlohy ze stejné látky. Úlohy musí vycházet z látky v zápiscích (stejná témata a značení), ale vymysli nové podobné příklady, nekopíruj je doslova. ${GEN_RULE} Ke každé úloze přidej "concept": obecnou otázku na princip, který úloha prověřuje (bez konkrétních čísel), a "principle": krátkou odpověď na ni (2–4 věty nebo vzorec). Úlohy řaď od lehčí po těžší.
+Připrav studentovi ${kind} ze zápisků níže: přesně ${P.n} úloh, obtížnost: ${DIFFS[P.diff]}.${P.topics&&P.topics.size?` Úlohy dávej JEN z těchto kapitol/témat: ${[...P.topics].map(t=>'„'+t+'“').join(', ')}.${P.topic&&P.topics.has(P.topic)?` Ve „${P.topic}“ je student zatím slabý.`:''}`:''}${P.days?` Bere se jen látka z posledních ${P.days} dní (níže jsou jen ty stránky).`:''} Každá úloha má "topic": krátký název tématu (2–3 slova), stejný pro úlohy ze stejné látky. Úlohy musí vycházet z látky v zápiscích (stejná témata a značení), ale vymysli nové podobné příklady, nekopíruj je doslova. ${GEN_RULE} Ke každé úloze přidej "concept": obecnou otázku na princip, který úloha prověřuje (bez konkrétních čísel), a "principle": krátkou odpověď na ni (2–4 věty nebo vzorec). Úlohy řaď od lehčí po těžší.
 ${MATH_RULE}
 Odpověz jen JSON v tomhle tvaru:
 {"title":"krátký název","questions":[
@@ -2122,7 +2152,7 @@ ${P.kind==='quiz'?'Použij hlavně typ "choice" (4 věrohodné možnosti, práv�
 "src" je značka stránky, ze které úloha vychází.
 
 ZÁPISKY:
-${knowledge(P.src)}`;
+${knowledge(P.src,P.since)}`;
   const ctl=new AbortController();P.ctl=ctl;
   try{const r=await sample.json(prompt,{modelTier:S.profile.ai==='quick'?'default':S.profile.ai,signal:ctl.signal});if(PR!==P)return;
     const qs=(r&&Array.isArray(r.questions)?r.questions:[]).filter(q=>q&&q.q&&((q.type==='choice'&&Array.isArray(q.options)&&q.options.length>1&&q.correct>=0&&q.correct<q.options.length)||(q.type==='open'&&q.answer)));
@@ -2797,6 +2827,7 @@ function learnHub(nbId,tab){LH={tab:tab||'today',nbId,sess:null,genSrc:new Set(n
     if(d.g){const s=LH.sess,c=s.q[s.i];gradeCard(c,+d.g);s.done++;if(+d.g===0&&!s.again.has(c.id)){s.again.add(c.id);s.q.push(c)}s.i++;s.shown=false;if(s.i>=s.q.length){if(s.lesson)lessonDone();else bumpStreak()}return renderHub()}
     if(d.cite){const [a,p]=d.cite.split(':');const nb=S.notebooks[+a-1];if(nb){closeModal();openNotebook(nb.id,+p-1)}return}
     if(d.prac!=null){closeModal();practiceDialog(d.prac||null,d.topic||null);return}
+    if(d.quick){const qn=LH&&LH.nbId||null;closeModal();practiceDialog(qn,null);if(PR){PR.days=pagesSince(PR.src,Date.now()-14*864e5)?14:0;PR.since=PR.days?Date.now()-14*864e5:0;genPractice()}return}
     if(d.gsrc){LH.genSrc.has(d.gsrc)?LH.genSrc.delete(d.gsrc):LH.genSrc.add(d.gsrc);return renderHub()}
     if('gen' in d)return genCards(b);
     if(d.delc){S.review.cards=S.review.cards.filter(c=>c.id!==d.delc);save();return renderHub()}
@@ -2819,7 +2850,7 @@ function renderHub(){if(!LH)return;const b=$('#lhBody',LH.m);if(!b)return;setTim
       h+='</div>'}
     b.innerHTML=h;return}
   if(LH.tab==='today'){h+=`<div class="hub-hero"><div><span class="eyebrow">Dnes</span><div class="score">${due}</div><p style="margin:0">${due?L(`${plural(due,'kartička čeká','kartičky čekají','kartiček čeká')} na zopakování, zhruba ${Math.max(1,Math.round(due*.4))} min.`,`${due===1?'card is':'cards are'} waiting for review, about ${Math.max(1,Math.round(due*.4))} min.`):L('Na dnes máš hotovo. Další kartičky přijdou zítra.','All done for today. More cards arrive tomorrow.')}</p></div><div class="streak"><b>${sn}</b><small>${plural(sn,'den','dny','dní')} v řadě</small></div></div>
-    <div class="row">${due?'<button type="button" class="btn primary" data-start>Začít opakování</button>':''}<button type="button" class="btn" data-prac="${LH.nbId||''}">Procvičit test</button></div>
+    <div class="row">${due?'<button type="button" class="btn primary" data-start>Začít opakování</button>':''}<button type="button" class="btn" data-quick="1">⚡ ${L('Rychlý test – posledních 14 dní','Quick test – last 14 days')}</button><button type="button" class="btn" data-prac="${LH.nbId||''}">${L('Procvičit… (vybrat sešity a kapitoly)','Practise… (choose notebooks & chapters)')}</button></div>
     <div class="group"><span class="eyebrow">Kartičky z tvých zápisků</span><p class="fine" style="margin:0">Kartičky přibývají samy z chyb v testech a z pomocníka (Další → Přidat do opakování). Nebo si je nech udělat ze sešitu:</p>
       <div class="row">${S.notebooks.map(n=>`<button type="button" class="pill" data-gsrc="${n.id}" aria-pressed="${LH.genSrc.has(n.id)}">${esc(n.title)}</button>`).join('')}</div>
       <div class="row"><button type="button" class="btn" data-gen ${LH.genSrc.size?'':'disabled'}>Vytvořit kartičky</button></div></div>`}
@@ -2922,7 +2953,7 @@ function writeQ(key,fn){const prev=SHR.q.get(key)||Promise.resolve();const n=pre
     SHR.last.delete(key);if(key.startsWith('meta/'))SHR.meta.delete(key.slice(5));if(key==='state')SYNC.lastState='';syncRetry()});SHR.q.set(key,n);return n}
 function syncRetry(){if(SHR.retryT)return;SHR.fails=(SHR.fails||0)+1;if(SHR.fails===3)toast(L('Synchronizace se teď nedaří – zkouším to znovu, nic se neztratí.','Sync is not working right now – retrying, nothing is lost.'),4000);
   SHR.retryT=setTimeout(()=>{SHR.retryT=0;S.notebooks.forEach(nb=>{if(nbBase(nb))schedulePush(nb)});if(SYNC.on)schedulePushState()},Math.min(60000,4000*Math.pow(1.6,Math.min(8,SHR.fails))))}
-function metaOf(nb){return {title:nb.title,subject:nb.subject||'',cover:nb.cover,paper:nb.paper,layout:nb.layout,layers:nb.layers||[],pages:nb.pages.map(p=>({id:p.id,h:Math.round(p.h)}))}}
+function metaOf(nb){return {title:nb.title,subject:nb.subject||'',cover:nb.cover,paper:nb.paper,layout:nb.layout,layers:nb.layers||[],pages:nb.pages.map(p=>({id:p.id,h:Math.round(p.h),mod:p.mod||0}))}}
 function shrinkSrc(src,max){return new Promise(res=>{const im=new Image();im.onload=()=>{let k=Math.min(1,900/Math.max(im.width,im.height)),q=.72,out=src;for(let i=0;i<5;i++){const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));const c=cv.getContext('2d');c.fillStyle='#fff';c.fillRect(0,0,cv.width,cv.height);c.drawImage(im,0,0,cv.width,cv.height);out=cv.toDataURL('image/jpeg',q);if(out.length<max)break;k*=.75;q=Math.max(.5,q-.08)}res(out)};im.onerror=()=>res(src);im.src=src})}
 function schedulePush(nb){clearTimeout(SHR.pushT.get(nb.id));SHR.pushT.set(nb.id,setTimeout(()=>pushShared(nb),450))}
 async function pushShared(nb){const db=await DB_P;const base=nbBase(nb);if(!db||!base)return;const known=SHR.ids.get(base)||new Set();SHR.ids.set(base,known);const present=new Set();
@@ -2944,7 +2975,7 @@ function subscribeShared(nb){const base=nbBase(nb);if(!base||SHR.subs.has(base))
     if(m.title&&m.title!==nb.title){nb.title=m.title;ch=true;if(ED&&ED.nb===nb)$('#edTitle').value=nb.title}
     for(const k of ['subject','cover','paper','layout'])if(m[k]!=null&&JSON.stringify(m[k])!==JSON.stringify(nb[k])){nb[k]=m[k];ch=true}
     if(Array.isArray(m.layers)){const lv=m.layers.length>1?m.layers:null;if(JSON.stringify(lv)!==JSON.stringify(nb.layers||null)){if(lv)nb.layers=lv;else delete nb.layers;ch=true;if(ED&&ED.nb===nb){ED.layer=Math.min(ED.layer||0,lv?lv.length-1:0);renderTools()}}}
-    for(const p of (m.pages||[])){const pg=nb.pages.find(x=>x.id===p.id);if(!pg){nb.pages.push({id:String(p.id),h:p.h||H,objs:[],rev:0,ocr:'',ocrRev:0});ch=true}else if(p.h>pg.h){pg.h=p.h;ch=true}}
+    for(const p of (m.pages||[])){const pg=nb.pages.find(x=>x.id===p.id);if(!pg){nb.pages.push({id:String(p.id),h:p.h||H,objs:[],rev:0,ocr:'',ocrRev:0,mod:p.mod||0});ch=true}else{if(p.h>pg.h){pg.h=p.h;ch=true}if((p.mod||0)>(pg.mod||0))pg.mod=p.mod}}
     SHR.meta.set(base,JSON.stringify(metaOf(nb)));if(ch){thumbs.delete(nb.id);save();refreshShared(nb,null)}},()=>{});
   SHR.subs.set(base,[u1,u2])})}
 function unsubscribeBase(base){const u=SHR.subs.get(base);if(u)u.forEach(f=>{try{f()}catch(e){}});SHR.subs.delete(base)}
@@ -2963,6 +2994,7 @@ async function shareNotebook(nb,btn){if(HAS_API&&!ACC.s){toast(L('Ke sdílení s
     if(oldBase&&oldBase!==base){unsubscribeBase(oldBase);writeQ('meta/'+oldBase,()=>db.doc(oldBase).set({deleted:true,movedTo:sid,updated:Date.now()}))}save();return true}
   catch(e){delete nb.shared;toast(e&&e.code==='invalid_argument'?'Nemáš právo sdílet. Sdílet může vlastník Loopnote nebo kdo má úpravy.':'Sdílení se nepovedlo. Zkus to znovu.',4000);return false}
   finally{if(btn&&btn.isConnected)btn.disabled=false}}
+function copyShareLink(nb){if(!HAS_API||!nb.shared)return toast(L('Sešit je sdílený','Notebook shared'));const link=(SITE||location.origin)+'/app/?join='+nb.shared.sid;Promise.resolve().then(()=>navigator.clipboard.writeText(link)).then(()=>toast(L('Sešit je sdílený a odkaz máš zkopírovaný – pošli ho spolužákům.','Notebook shared and link copied – send it to your classmates.'),4500),()=>toast(L('Sešit je sdílený – odkaz najdeš níž.','Notebook shared – the link is below.'),4000))}
 function shareDialog(nb){const m=openModal(`<div class="modal-h"><h2>Sdílet se spolužáky</h2><button class="iconbtn" type="button" data-x aria-label="Zavřít"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><div class="modal-b" id="shBody"></div>`);m.style.maxWidth='560px';
   const draw=()=>{$('#shBody',m).innerHTML=nb.shared?`<div class="promise"><b>„${esc(nb.title)}“ je sdílený.</b>Co kdokoli napíše, nakreslí nebo vymaže, uvidí ostatní naživo. Ideální na společné zápisky z přednášek: každý dopíše, co má.</div>
       <p class="fine" style="margin:0">${HAS_API?L('Spolužáci si ho přidají přes odkaz nebo kód níže. Musí být přihlášení (stačí e-mail).','Classmates add it with the link or code below. They need to be signed in (just an email).'):'Spolužáci ho najdou v knihovně v sekci „Sdílené se mnou“. V prototypu k tomu potřebují přístup k Loopnote: v Claude dej vpravo nahoře Sdílet a pozvi je s možností úprav.'}</p>${shareHintHTML(nb)}
@@ -2971,7 +3003,7 @@ function shareDialog(nb){const m=openModal(`<div class="modal-h"><h2>Sdílet se 
       <ul class="fine" style="margin:0;padding-left:18px"><li>Každý dopíše kus přednášky, který má.</li><li>Pomocník pak zná zápisky celé skupiny.</li><li>Fotky se kvůli rychlosti zmenší.</li></ul>
       <div class="row"><button type="button" class="btn primary" data-share>Sdílet sešit</button></div>`};draw();
   m.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;if('x' in b.dataset)return closeModal();
-    if('share' in b.dataset){if(await shareNotebook(nb,b)){draw();toast('Sešit je sdílený')}}
+    if('share' in b.dataset){if(await shareNotebook(nb,b)){draw();copyShareLink(nb)}}
     if('unlink' in b.dataset){unsubscribeBase(nbBase(nb));delete nb.shared;if(SYNC.on){nb.cloud=uid();touch(nb);subscribeShared(nb)}save();closeModal();toast('Sešit už se se spolužáky nesynchronizuje')}})}
 /* vlastní sešity: stejný účet Claude na iPadu, PC i mobilu = stejné sešity */
 function stateJson(){const st={profile:S.profile,prefs:Object.assign({},S.prefs,{fab:undefined,hinted:undefined,remShown:undefined,reseed:undefined}),review:S.review,agenda:AGRAW().filter(a=>!a.del||Date.now()-(a.upd||0)<30*864e5),xp:S.xp,timers:TMRAW()};let j=JSON.stringify(st,replacer);
@@ -3469,12 +3501,20 @@ function talkStop(){const u=TALK.ui,was=TALK.on;TALK.on=false;TALK.ui=null;TALK.
 /* nastavení hlasu: přirozený (Gemini) nebo hlas zařízení */
 function voiceHTML(){const pv=S.prefs.voice||{},cloud=VX_ON();
   const eng=HAS_API?`<div class="row" style="margin-bottom:8px">${[['cloud',L('Přirozený hlas','Natural voice')],['device',L('Hlas zařízení','Device voice')]].map(([k,n])=>`<button type="button" class="pill" data-veng="${k}" aria-pressed="${(cloud?'cloud':'device')===k}">${n}</button>`).join('')}</div>`:'';
-  if(!cloud)return voiceHTMLDevice().replace('<span class="eyebrow">Hlas pomocníka</span>','<span class="eyebrow">Hlas pomocníka</span>'+eng);
+  if(!cloud)return voiceHTMLDevice().replace('<span class="eyebrow">Hlas pomocníka</span>','<span class="eyebrow">Hlas pomocníka</span>'+eng)+deskTalkHTML();
   return `<div class="group"><span class="eyebrow">Hlas pomocníka</span>${eng}
     <div class="row"><select id="sCloudVoice" class="sel" style="flex:1" aria-label="${L('Hlas','Voice')}">${CLOUD_VOICES.map(([k,d])=>`<option value="${k}" ${vxVoice()===k?'selected':''}>${k} · ${esc(d)}</option>`).join('')}</select><button type="button" class="btn" data-cvtest>${L('Vyzkoušet','Try it')}</button></div>
     <p class="fine" style="margin:6px 0 0">${L('Mluví stejně přirozeně jako Gemini a umí jazyk, který máš v appce nastavený. Potřebuje internet.','Sounds as natural as Gemini and speaks the language you set in the app. Needs internet.')}</p>
     <label class="fld">Rychlost řeči <input type="range" id="sRate" min="0.7" max="1.4" step="0.05" value="${pv.rate||1}"></label>
-    <button type="button" class="toggle" data-tg="autoRead" aria-pressed="${S.prefs.autoRead}"><span><b>Číst odpovědi nahlas</b><small>Pomocník ti každou odpověď rovnou přečte a píše ji tak, aby se dobře poslouchala.</small></span><span class="knob"></span></button></div>`}
+    <button type="button" class="toggle" data-tg="autoRead" aria-pressed="${S.prefs.autoRead}"><span><b>Číst odpovědi nahlas</b><small>Pomocník ti každou odpověď rovnou přečte a píše ji tak, aby se dobře poslouchala.</small></span><span class="knob"></span></button></div>${deskTalkHTML()}`}
+function deskTalkHTML(){if(!window.loopnoteDesktop)return '';const m=S.prefs.deskTalk||'screen',sub=S.prefs.deskSubs!==false;
+  return `<div class="group" id="deskTalkG"><span class="eyebrow">${L('Mluvení na ploše počítače','Talking on the desktop')}</span>
+    <div class="opts c2"><button type="button" class="opt" data-dtalk="screen" aria-pressed="${m==='screen'}"><b>${L('Jen hlas + kreslení','Voice + drawing')}</b><small>${L('Žádné okénko. Pomocník vidí obrazovku, mluví a ukazuje přímo na ni – kroužek, šipka, poznámka.','No window. The helper sees your screen, talks and points right on it – circles, arrows, notes.')}</small></button>
+    <button type="button" class="opt" data-dtalk="panel" aria-pressed="${m!=='screen'}"><b>${L('S okénkem','With a panel')}</b><small>${L('Odpovědi i jako text v malém okénku vedle bubliny.','Answers also as text in a small panel by the bubble.')}</small></button></div>
+    <button type="button" class="toggle" data-dsubs aria-pressed="${sub}"><span><b>${L('Titulky','Subtitles')}</b><small>${L('Při mluvení bez okénka ukazovat dole na obrazovce, co pomocník říká.','Show what the helper says at the bottom of the screen.')}</small></span><span class="knob"></span></button>
+    <p class="fine" style="margin:0">${L('Mluvit začneš podržením bubliny, pravým klikem nebo Ctrl+Shift+Mezerník. Ukončíš klikem na bublinu nebo Esc.','Start talking by holding the bubble, right-clicking it or Ctrl+Shift+Space. Stop with a click on the bubble or Esc.')}</p></div>`}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-dtalk],[data-dsubs]');if(!b)return;if(b.dataset.dtalk)S.prefs.deskTalk=b.dataset.dtalk;else S.prefs.deskSubs=!(S.prefs.deskSubs!==false);save();
+  window.__deskHello&&window.__deskHello();const g=document.getElementById('deskTalkG');if(g)g.outerHTML=deskTalkHTML()},true);
 function VX_ONB(){const cur=vxVoice();return `<h1>${L('Hlas pomocníka','Your helper\'s voice')}</h1><p class="lead">${L('Vyber si, jak na tebe bude pomocník mluvit. Ťukni na hlas a hned ho uslyšíš.','Pick how your helper sounds. Tap a voice to hear it.')}</p>
   <div class="opts">${CLOUD_VOICES.slice(0,6).map(([k,d])=>`<button type="button" class="opt" data-cvoice="${k}" aria-pressed="${cur===k}"><b>${k}</b><small>${esc(d)}</small></button>`).join('')}</div>
   <button type="button" class="toggle" data-onbtg="autoRead" aria-pressed="${S.prefs.autoRead}" style="margin-top:14px;width:100%"><span><b>Číst odpovědi nahlas</b><small>Můžeš kdykoli změnit v nastavení.</small></span><span class="knob"></span></button>`}
@@ -3519,7 +3559,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acc]
     SYNCUI.busy=true;accRedraw();try{await accVerifyCode(SYNCUI.email,code);SYNCUI.step='email';SYNCUI.busy=false;accRedraw()}catch(x){SYNCUI.busy=false;SYNCUI.err=L('Kód nesedí nebo vypršel. Zkus to znovu.','The code is wrong or expired. Try again.');accRedraw()}return}
   if(k==='back'){SYNCUI.step='email';accRedraw();return}
   if(k==='logout'){ACC.s=null;accSave();toast(L('Odhlášeno. Sešity zůstaly v tomhle zařízení.','Signed out. Your notebooks stay on this device.'),3000);setTimeout(()=>location.reload(),900);return}
-  if(k==='refcopy'){try{navigator.clipboard.writeText(b.dataset.link);toast(L('Odkaz zkopírován – pošli ho kamarádovi.','Link copied – send it to a friend.'))}catch(x){}return}
+  if(k==='refcopy'){Promise.resolve().then(()=>navigator.clipboard.writeText(b.dataset.link)).then(()=>toast(L('Odkaz zkopírován – pošli ho kamarádovi.','Link copied – send it to a friend.')),()=>toast(b.dataset.link,6000));return}
   if(k==='refuse'){const c=(document.getElementById('refCode').value||'').trim();if(c)refRedeem(c);return}
   if(k==='join'){const c=(document.getElementById('joinCode').value||'').trim().replace(/^.*join=/,'');if(c)joinShared(c);return}},true);
 /* připojení ke sdílenému sešitu přes odkaz (?join=…) nebo kód */
@@ -3533,7 +3573,7 @@ async function joinShared(sid){sid=String(sid).replace(/[^A-Za-z0-9_-]/g,'');if(
 function shareHintHTML(nb){if(!HAS_API)return '';const sid=nb.shared&&nb.shared.sid;if(!sid)return '';const link=(SITE||location.origin)+'/app/?join='+sid;
   return `<div class="group"><span class="eyebrow">${L('Pošli spolužákům','Send to classmates')}</span><div class="row"><input class="sel" style="flex:1" readonly value="${esc(link)}" id="shLink"><button type="button" class="btn" data-copylink>${L('Kopírovat','Copy')}</button></div>
     <p class="fine" style="margin:0">${L('V appce můžou místo odkazu zadat kód','In the app they can enter this code instead')}: <b style="user-select:all">${esc(sid)}</b> (${L('Nastavení → Účet a synchronizace','Settings → Account & sync')})</p></div>`}
-document.addEventListener('click',e=>{if(!e.target.closest('[data-copylink]'))return;const i=document.getElementById('shLink');if(!i)return;try{navigator.clipboard.writeText(i.value);toast(L('Odkaz zkopírován','Link copied'))}catch(x){i.select()}},true);
+document.addEventListener('click',e=>{if(!e.target.closest('[data-copylink]'))return;const i=document.getElementById('shLink');if(!i)return;Promise.resolve().then(()=>navigator.clipboard.writeText(i.value)).then(()=>toast(L('Odkaz zkopírován','Link copied')),()=>i.select())},true);
 setTimeout(function refFromUrl(){const q=new URLSearchParams(location.search);const r=q.get('ref');if(!r)return;history.replaceState(null,'',location.pathname);
   if(ACC.s)setTimeout(()=>refRedeem(r),2000);else{try{localStorage.setItem('krouzek-ref',r)}catch(e){}setTimeout(()=>toast(L('Kamarád tě pozval! Přihlas se (Nastavení → Účet) a oba dostanete týden Plus.','A friend invited you! Sign in (Settings → Account) and you both get a week of Plus.'),6000),2500)}},0);
 setTimeout(function joinFromUrl(){const q=new URLSearchParams(location.search);const j=q.get('join');if(j){history.replaceState(null,'',location.pathname);setTimeout(()=>joinShared(j),1500)}
@@ -3645,7 +3685,7 @@ async function mobileExplain(url){if($('#modalRoot').children.length)closeModal(
   document.addEventListener('visibilitychange',resume);setTimeout(resume,1500)})();
 
 /* počítač: kroužek nebo hlas na ploše -> odpověď v okénku na ploše; appka umí zapsat do sešitu, kalendáře i minutku */
-async function explainShot(url,question,history){const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};
+async function explainShot(url,question,history,onText){const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};
   const imgs=url?[(await fetch(url)).blob()]:[];const talking=TALK.on;
   const sys=`${TEACHER()}
 ${profileCtx(null)}
@@ -3655,9 +3695,25 @@ Odpověď se ukáže v malém okénku${talking?' a bude se číst nahlas':''}: n
 ${AG_RULE(!!url)}`;
   const input=history&&history.length?[{role:'user',content:sys},...history.slice(-8),{role:'user',content:question}]:(question?sys+'\n\nSTUDENT: '+question:sys);
   if(usageLeft()<=0)throw {code:'usage'};
-  const r=await sample(input,{images:imgs,modelTier:S.profile.ai||'default'});spendUsage();return String(r.text||'').trim()}
+  const r=await sample(input,{images:imgs,modelTier:S.profile.ai||'default',onText:onText?({text})=>onText(cleanAns(text,true)):undefined});spendUsage();return String(r.text||'').trim()}
+/* mluvení bez okénka: pomocník vidí obrazovku, mluví a ukazuje na ni */
+async function screenAnswer(q,history,onText){const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};if(usageLeft()<=0)throw {code:'usage'};
+  let sh=null;try{sh=await window.loopnoteDesktop.screenShot()}catch(e){}const imgs=sh?[(await fetch(sh.url)).blob()]:[];
+  const sys=`${TEACHER()}
+${profileCtx(null)}
+JAK MLUVIT: ${styleGuide()}
+Student s tebou mluví hlasem přes Loopnote na počítači. ${sh?'Na obrázku je, co má právě teď na obrazovce (web, video, PDF, úloha…).':''} Odpovídej krátce a přirozeně, jako když sedíš vedle něj: nejvýš 4–5 vět, bez nadpisů a seznamů. ${VOICE_RULE}
+UKAZOVÁNÍ NA OBRAZOVCE: ${sh?`Když pomůže něco ukázat, nakresli to studentovi přímo na obrazovku – na úplný konec odpovědi přidej jeden řádek
+[[KRESLI {"items":[{"type":"circle","box":[ymin,xmin,ymax,xmax],"color":"red"}]}]]
+type: circle (zakroužkovat), underline (podtrhnout), arrow (šipka k místu), box (orámovat), check (fajfka – správně), cross (křížek – chyba), text (krátká poznámka rukou vedle místa, pole "text", max 30 znaků). box = místo na obrázku v souřadnicích 0–1000 (ymin, xmin, ymax, xmax), co nejpřesněji. color: red, green, blue nebo yellow. Nejvýš 4 položky. V řeči na ně přirozeně odkaž („tady, co jsem zakroužkoval…“). Když není co ukazovat, řádek vynech.`:'Teď obrazovku nevidíš, nic nekresli.'}
+${AG_RULE(false)}`;
+  const input=history&&history.length?[{role:'user',content:sys},...history.slice(-8),{role:'user',content:q}]:sys+'\n\nSTUDENT ŘÍKÁ: '+q;
+  const r=await sample(input,{images:imgs,modelTier:S.profile.ai||'default',onText:onText?({text})=>onText(cleanAns(text,true)):undefined});spendUsage();return String(r.text||'').trim()}
+function drawItems(raw){const i=String(raw).indexOf('[[KRESLI');if(i<0)return [];const rest=raw.slice(i+8),j=rest.lastIndexOf(']]');if(j<0)return [];
+  try{const o=JSON.parse(rest.slice(0,j).trim());const T=['circle','underline','arrow','box','check','cross','text'];
+    return (o.items||[]).filter(x=>x&&T.includes(x.type)&&Array.isArray(x.box)&&x.box.length===4).slice(0,6).map(x=>({type:x.type,box:x.box.map(n=>Math.max(0,Math.min(1000,+n||0))),color:x.color,text:String(x.text||'').slice(0,40)}))}catch(e){return []}}
 function deskImg(url){return new Promise(r=>{if(!url){r(null);return}const im=new Image();im.onload=()=>r({url,w:im.naturalWidth,h:im.naturalHeight});im.onerror=()=>r(null);im.src=url})}
-async function deskAnswer(url,q,history){const img=await deskImg(url);const raw=await explainShot(url,q,history);
+async function deskAnswer(url,q,history,onText){const img=await deskImg(url);const raw=await explainShot(url,q,history,onText);
   const nT=TMRAW().filter(t=>!t.del).length;const cal=agHandle(raw,q,img)||[];const zap=LAST_ZAPIS.slice();const hadTimer=TMRAW().filter(t=>!t.del).length>nT;
   const acts=[...zap.map(z=>({k:'note',nbId:z.nb.id,pi:z.pi,t:L('Zapsáno do sešitu','Written to')+' „'+z.nb.title+'“'})),...cal.map(a=>({k:'cal',t:L('Zapsáno do kalendáře','Added to calendar')+': '+a.title+' · '+agDate(a)})),...(hadTimer?[{k:'timer',t:L('Minutka běží','Timer running')}]:[])];
   return {text:cleanAns(raw,false),acts}}
@@ -3668,14 +3724,20 @@ function screenToNote(url,text){const title=L('Z obrazovky','From screen');let n
   if(!url){fin(nb.pages.length-1);return}
   deskImg(url).then(img=>fin(img?addImageToNb(nb,img):nb.pages.length-1))}
 if(window.loopnoteDesktop){document.documentElement.classList.add('is-desktop');
-  const D=window.loopnoteDesktop;const hello=()=>D.hello&&D.hello({ui:LANG(),loc:LOC(),autoRead:!!S.prefs.autoRead,cloud:VX_ON()});hello();setInterval(hello,4000);
+  const D=window.loopnoteDesktop;const hello=()=>D.hello&&D.hello({ui:LANG(),loc:LOC(),autoRead:!!S.prefs.autoRead,cloud:VX_ON(),mode:S.prefs.deskTalk||'screen',subs:S.prefs.deskSubs!==false});window.__deskHello=hello;
+  D.onSetPref&&D.onSetPref(p=>{if(p&&p.deskTalk){S.prefs.deskTalk=p.deskTalk;save();hello();toast(p.deskTalk==='screen'?L('Mluvení: jen hlas a kreslení na obrazovku','Talking: voice + drawing on screen'):L('Mluvení: s okénkem','Talking: with a panel'))}});hello();setInterval(hello,4000);
   vxEvt=e=>D.talkEvent&&D.talkEvent(Object.assign({sid:0},e));
   D.onImage(p=>screenToNote(p&&p.url!==undefined?p.url:p,(p&&p.text)||''));
   // přečtení nahlas řídí okénko (když ho mezitím zavřeš, nic nemluví)
-  D.onExplain(async req=>{try{const r=await deskAnswer(req.url,req.q,req.history);D.explainResult({id:req.id,text:r.text,acts:r.acts,lang:LOC(),ui:LANG(),autoRead:!req.q&&!!S.prefs.autoRead})}
+  D.onExplain(async req=>{try{let last=0;const r=await deskAnswer(req.url,req.q,req.history,D.explainPartial?t=>{const n=Date.now();if(n-last>90){last=n;D.explainPartial({id:req.id,text:t})}}:undefined);D.explainResult({id:req.id,text:r.text,acts:r.acts,lang:LOC(),ui:LANG(),autoRead:!req.q&&!!S.prefs.autoRead})}
     catch(e){D.explainResult({id:req.id,err:errCopy(e&&e.code),lang:LOC(),ui:LANG()})}});
-  D.onTalk&&D.onTalk(req=>{talkStop();if(!req.on)return;const hist=(req.history||[]).slice();const sid=req.sid;
-    talkLoop(async q=>{const r=await deskAnswer(req.url,q,hist);hist.push({role:'user',content:q},{role:'assistant',content:r.text});D.talkEvent({sid,type:'answer',q,text:r.text,acts:r.acts});return r.text},
+  D.onTalk&&D.onTalk(req=>{talkStop();if(!req.on)return;
+    if(req.mode==='screen'){const hist=[],sid=req.sid;D.drawClear(false);
+      talkLoop(async q=>{let lp=0;const raw=await screenAnswer(q,hist,t=>{const n=Date.now();if(n-lp>120){lp=n;D.talkEvent({sid,type:'partial',text:t})}});
+          const items=drawItems(raw);const nT=TMRAW().filter(t=>!t.del).length;agHandle(raw,q,null);const text=cleanAns(raw,false);
+          hist.push({role:'user',content:q},{role:'assistant',content:text});D.draw({items});D.talkEvent({sid,type:'answer',q,text});return text},
+        (st,x)=>{if(st==='level')return;if(st==='listening')D.drawClear(true);D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x})});return}const hist=(req.history||[]).slice();const sid=req.sid;
+    talkLoop(async q=>{let lp=0;const r=await deskAnswer(req.url,q,hist,t=>{const n=Date.now();if(n-lp>90){lp=n;D.talkEvent({sid,type:'partial',text:t})}});hist.push({role:'user',content:q},{role:'assistant',content:r.text});D.talkEvent({sid,type:'answer',q,text:r.text,acts:r.acts});return r.text},
       (st,x)=>{if(st!=='level')D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x});else D.talkEvent({sid,type:'level',x})})});
   D.onSpeak&&D.onSpeak(r=>{if(r&&r.text){unlockAudio();speak(r.text)}else stopSpeak()});
   D.onOpenNb&&D.onOpenNb(r=>{const nb=S.notebooks.find(n=>n.id===r.nbId);if(!nb)return;if($('#modalRoot').children.length)closeModal();if(!S.profile.onboarded){S.profile.onboarded=true;save()}openNotebook(nb.id,r.pi||0)});

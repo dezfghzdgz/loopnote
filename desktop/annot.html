@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loopnote – drawing on screen</title>
+<style>
+  /* průhledná vrstva přes celou obrazovku, myš jí prochází – pomocník tu kreslí, co ukazuje */
+  html,body{margin:0;height:100%;overflow:hidden;background:transparent;pointer-events:none;user-select:none}
+  canvas{position:absolute;inset:0;width:100%;height:100%}
+  #sub{position:absolute;left:50%;bottom:56px;transform:translateX(-50%);max-width:min(760px,80vw);background:rgba(18,24,22,.86);color:#fff;
+    font:500 17px/1.45 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;padding:10px 16px;border-radius:14px;box-shadow:0 12px 30px -12px rgba(0,0,0,.6);
+    display:flex;gap:10px;align-items:flex-start;opacity:0;transition:opacity .25s}
+  #sub.on{opacity:1}
+  #sub .dot{width:10px;height:10px;border-radius:50%;background:#e03131;flex:none;margin-top:7px}
+  #sub.thinking .dot,#sub.heard .dot{background:#9b7bff;animation:p 1s infinite alternate}
+  #sub.speaking .dot{background:#4f8dff}
+  #sub.listening .dot{animation:p .8s infinite alternate}
+  @keyframes p{from{opacity:.3}to{opacity:1}}
+  #sub .tx{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="sub"><span class="dot"></span><span class="tx" id="tx"></span></div>
+<script>
+  const api = window.loopnoteDesktop, cv = document.getElementById("c"), ctx = cv.getContext("2d");
+  const COL = { red: "#e03131", green: "#2f9e44", blue: "#1c7ed6", yellow: "#f59f00" };
+  let items = [], start = 0, raf = 0, fade = 1, fadeT = 0, subsOn = true;
+  const T = { listening: { en: "Listening…", cs: "Poslouchám…" }, thinking: { en: "Thinking…", cs: "Přemýšlím…" } };
+  const ui = new URLSearchParams(location.search).get("ui") || "en";
+  function size() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; draw(); }
+  addEventListener("resize", size);
+  // ručně vypadající čára: pár bodů s drobnými odchylkami
+  function wob(seed) { let h = seed * 9301 + 49297; return () => { h = (h * 9301 + 49297) % 233280; return h / 233280 - .5; }; }
+  function path(it) {
+    const W = innerWidth, H = innerHeight, b = it.box || [0, 0, 0, 0];
+    let y0 = b[0] / 1000 * H, x0 = b[1] / 1000 * W, y1 = b[2] / 1000 * H, x1 = b[3] / 1000 * W;
+    if (x1 < x0) [x0, x1] = [x1, x0]; if (y1 < y0) [y0, y1] = [y1, y0];
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, w = Math.max(16, x1 - x0), h = Math.max(16, y1 - y0), r = wob(Math.round(cx + cy));
+    const pts = [];
+    if (it.type === "circle") { // kroužek kolem (trochu přetažený, jak to dělá člověk)
+      const rx = w / 2 + 14, ry = h / 2 + 12;
+      const ph = r() * 6; for (let a = 0; a <= Math.PI * 2.15; a += .05) { const k = 1 + .035 * Math.sin(a * 2 + ph) + a * .012; pts.push([cx + Math.cos(a - .6) * rx * k, cy + Math.sin(a - .6) * ry * k]); }
+    } else if (it.type === "underline") {
+      for (let i = 0; i <= 20; i++) pts.push([x0 - 4 + (w + 8) * i / 20, y1 + 6 + Math.sin(i / 3 + r()) * 1.6]);
+    } else if (it.type === "box") {
+      const p = 8; [[x0 - p, y0 - p], [x1 + p, y0 - p], [x1 + p, y1 + p], [x0 - p, y1 + p], [x0 - p, y0 - p]].forEach((q, i, a) => { if (!i) return pts.push(q); const s = a[i - 1]; for (let k = 1; k <= 10; k++) pts.push([s[0] + (q[0] - s[0]) * k / 10 + Math.sin(k) * .8, s[1] + (q[1] - s[1]) * k / 10 + Math.cos(k) * .8]); });
+    } else if (it.type === "check") {
+      const s = Math.min(46, Math.max(24, h)), bx = x1 + 12, by = cy;
+      pts.push([bx, by], [bx + s * .35, by + s * .4], [bx + s, by - s * .55]);
+    } else if (it.type === "cross") {
+      const s = Math.min(40, Math.max(22, h)) / 2;
+      return [[[cx - s, cy - s], [cx + s, cy + s]], [[cx + s, cy - s], [cx - s, cy + s]]];
+    } else if (it.type === "arrow") { // šipka z volného místa k cíli
+      const fromLeft = cx > W * .5, sx = fromLeft ? x0 - 150 : x1 + 150, sy = cy + (cy > H * .5 ? -90 : 90);
+      const ex = fromLeft ? x0 - 10 : x1 + 10, ey = cy;
+      for (let i = 0; i <= 16; i++) { const t = i / 16; pts.push([sx + (ex - sx) * t, sy + (ey - sy) * t + Math.sin(t * Math.PI) * -18]); }
+      const a = Math.atan2(ey - pts[14][1], ex - pts[14][0]), hl = 18;
+      return [pts, [[ex - hl * Math.cos(a - .5), ey - hl * Math.sin(a - .5)], [ex, ey], [ex - hl * Math.cos(a + .5), ey - hl * Math.sin(a + .5)]]];
+    }
+    return [pts];
+  }
+  function lineLen(p) { let l = 0; for (let i = 1; i < p.length; i++) l += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]); return l; }
+  function draw() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0); ctx.globalAlpha = fade;
+    const now = performance.now(); let busy = false;
+    items.forEach((it, idx) => {
+      const t0 = start + idx * 650, prog = Math.max(0, Math.min(1, (now - t0) / 550)); if (prog < 1) busy = true; if (prog <= 0) return;
+      const col = COL[it.color] || COL.red;
+      if (it.type === "text") { // poznámka rukou vedle místa
+        const W = innerWidth, H = innerHeight, b = it.box || [0, 0, 0, 0];
+        const x = Math.min(W - 260, b[3] / 1000 * W + 14), y = Math.max(30, b[0] / 1000 * H + 4), s = String(it.text || "").slice(0, Math.ceil(String(it.text || "").length * prog));
+        ctx.font = '600 24px "Segoe Print","Ink Free","Comic Sans MS","Bradley Hand",cursive'; ctx.lineWidth = 6; ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineJoin = "round";
+        ctx.strokeText(s, x, y + 20); ctx.fillStyle = col; ctx.fillText(s, x, y + 20); return;
+      }
+      for (const seg of path(it)) {
+        const L = lineLen(seg), want = L * prog; let acc = 0;
+        for (const pass of [[9, "rgba(255,255,255,.85)"], [4.5, col]]) {
+          ctx.lineWidth = pass[0]; ctx.strokeStyle = pass[1]; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.beginPath(); acc = 0;
+          ctx.moveTo(seg[0][0], seg[0][1]);
+          for (let i = 1; i < seg.length; i++) { const d = Math.hypot(seg[i][0] - seg[i - 1][0], seg[i][1] - seg[i - 1][1]); if (acc + d > want) { const k = (want - acc) / d; ctx.lineTo(seg[i - 1][0] + (seg[i][0] - seg[i - 1][0]) * k, seg[i - 1][1] + (seg[i][1] - seg[i - 1][1]) * k); break; } acc += d; ctx.lineTo(seg[i][0], seg[i][1]); }
+          ctx.stroke();
+        }
+      }
+    });
+    if (busy) raf = requestAnimationFrame(draw); else raf = 0;
+  }
+  function show(list) { items = (list || []).slice(0, 6); start = performance.now(); fade = 1; clearInterval(fadeT); cancelAnimationFrame(raf); size(); raf = requestAnimationFrame(draw); }
+  function clear(slow) {
+    clearInterval(fadeT);
+    if (!slow) { items = []; draw(); return; }
+    fadeT = setInterval(() => { fade -= .06; if (fade <= 0) { clearInterval(fadeT); items = []; fade = 1; } draw(); }, 40);
+  }
+  const sub = document.getElementById("sub"), tx = document.getElementById("tx");
+  function subtitle(st, text) {
+    if (!subsOn || st === "off") { sub.classList.remove("on"); return; }
+    sub.className = "on " + st;
+    tx.textContent = text || (T[st] ? (T[st][ui] || T[st].en) : "");
+  }
+  api.onAnnot((m) => {
+    if (m.subs != null) subsOn = !!m.subs;
+    if (m.items) show(m.items);
+    if (m.clear) clear(m.clear === "slow");
+    if (m.st) subtitle(m.st, m.text);
+  });
+  size();
+</script>
+</body>
+</html>

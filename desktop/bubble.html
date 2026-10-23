@@ -6,7 +6,7 @@
 <style>
   html,body{margin:0;height:100%;background:transparent;overflow:hidden;user-select:none}
   #b{position:absolute;inset:6px;border-radius:50%;background:#0f7c6b;display:grid;place-items:center;cursor:pointer;box-shadow:0 8px 18px -8px rgba(0,0,0,.55);transition:transform .12s,background .2s}
-  #b:hover{transform:scale(1.06)}
+  #b{touch-action:none}#b:hover{filter:brightness(1.08)}
   #b svg{width:34px;height:34px;color:#fff}
   #b.listening{background:#c0392b;animation:pl 1.1s infinite}
   #b.thinking,#b.heard{background:#6b46c1}
@@ -36,15 +36,17 @@
     if (!st) return;
     const dx = e.screenX - st.x, dy = e.screenY - st.y;
     if (!st.moved && Math.hypot(dx, dy) < 4) return;
-    st.moved = true; clearTimeout(hold); st.x = e.screenX; st.y = e.screenY; api.bubbleMove(dx, dy);
+    if (!st.moved) api.bubbleDrag("start");
+    st.moved = true; clearTimeout(hold); st.x = e.screenX; st.y = e.screenY; api.bubbleDrag("move");
   });
   b.addEventListener("pointerup", () => {
     clearTimeout(hold);
-    if (!st) return; const { moved, held } = st; st = null; if (moved || held) return;
+    if (!st) return; const { moved, held } = st; st = null; if (moved) api.bubbleDrag("end"); if (moved || held) return;
     const now = Date.now(); taps = taps.filter((x) => now - x < 900); taps.push(now); clearTimeout(t);
     if (taps.length >= 3) { taps = []; api.bubbleOff(); return; }
     t = setTimeout(() => { taps = []; api.bubbleClick(); }, 330);
   });
+  b.addEventListener("pointercancel", () => { clearTimeout(hold); if (st && st.moved) api.bubbleDrag("end"); st = null; });
   b.addEventListener("contextmenu", (e) => { e.preventDefault(); api.bubbleTalk(); });
   api.onBubbleState && api.onBubbleState((s) => { b.className = s || ""; });
 </script>

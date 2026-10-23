@@ -97,6 +97,7 @@ Appky sestaví GitHub sám – nic neinstaluješ.
 - **Klik** (nebo **Ctrl+Shift+L**) → kroužkuješ přímo na živé obrazovce → vedle vyskočí okénko s vysvětlením.
 - **Podržet / pravý klik** (nebo **Ctrl+Shift+Mezerník**) → mluvíš s pomocníkem hlasem. Odpovídá přirozeným hlasem (Gemini) a pak zase poslouchá. Klik na mikrofon = skočit mu do řeči.
 - Pomocník umí sám zapisovat: „zapiš mi to do matematiky“, „za 3 dny mám test“, „minutka na 15 minut“ → zápis v sešitě, termín v kalendáři, minutka s upozorněním.
+- **Mluvení bez okénka** (výchozí): pomocník vidí obrazovku, mluví a rovnou na ni kreslí – kroužek, šipku, podtržení, fajfku/křížek nebo krátkou poznámku. Dole běží titulky. Ukončíš klikem na bublinu nebo Esc. Přepnout na „s okénkem“ jde v Nastavení → Hlas nebo v liště u hodin.
 - Přetažením bublinu posuneš, trojklikem schováš – vrátí se, jakmile znovu otevřeš Loopnote. Zavřením okna appka běží dál v liště.
 
 **Hlas:** přirozený hlas jde přes funkci `ai` (Gemini TTS) a nepočítá se do dotazů zdarma (vlastní limit `VOICE_LIMIT`, výchozí 400 kousků denně). V Nastavení → Hlas jde vybrat jeden z 10 hlasů, nebo přepnout na hlas zařízení.
