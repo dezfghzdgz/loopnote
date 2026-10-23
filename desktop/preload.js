@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld("loopnoteDesktop", {
   drawClear: (slow) => ipcRenderer.send("draw-clear", slow),
   drawTest: (d) => ipcRenderer.send("draw-test", d),
   onAnnot: (cb) => on("annot", cb),
+  jobs: (n) => ipcRenderer.send("jobs", n),
+  notify: (d) => ipcRenderer.send("notify", d),
   capture: () => ipcRenderer.send("bubble-click"),
   // bublina
   bubbleMove: (dx, dy) => ipcRenderer.send("bubble-move", dx, dy),

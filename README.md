@@ -121,6 +121,10 @@ Appky sestaví GitHub sám – nic neinstaluješ.
 - **Plán přípravy**: u testu v kalendáři „Plán přípravy“ – každý den krátký úkol až do testu.
 - **Hlídání chyb**: když se při psaní zastavíš, pomocník mrkne na nový zápis a při jasné chybě dá na okraj červenou tečku (vypneš v Nastavení → Psaní).
 
+## Počítač: kamarád u kurzoru a úkoly na pozadí
+- Malý Loopnote jezdí vedle myši (nastavení: pořád / jen při mluvení / vypnuto, i v menu u hodin). Při mluvení (Ctrl+Shift+Mezerník) poslouchá, přemýšlí a mluví – a když se ptáš „kde je…/kam kliknout“, doletí na místo a ukáže ho s popiskem. Funguje i na více monitorech (bere obrazovku, kde je myš).
+- Delší věci („udělej mi podobné příklady“, „připrav test“, „udělej z toho zápis“) pomocník dělá na pozadí: hned řekne, že na tom pracuje, ty můžeš dělat cokoli dalšího a po dokončení přijde oznámení a výsledek je v sešitu.
+
 ## Android: bublina přes ostatní aplikace
 Nastavení → Bublina přes ostatní aplikace → Zapnout. Android se zeptá na „Zobrazovat přes jiné aplikace“ a na snímání obrazovky. Ťukneš na bublinu, zakroužkuješ a Loopnote to vysvětlí. Appka je podepsaná pořád stejným klíčem (`mobile/debug.keystore`), takže nové verze jdou nainstalovat přes staré. **Jen jednou** (při přechodu z verze před tímhle klíčem) je potřeba starou appku odinstalovat – předtím se přihlas, ať se sešity synchronizují.
 

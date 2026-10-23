@@ -7,6 +7,7 @@
   /* průhledná vrstva přes celou obrazovku, myš jí prochází – pomocník tu kreslí, co ukazuje */
   html,body{margin:0;height:100%;overflow:hidden;background:transparent;pointer-events:none;user-select:none}
   canvas{position:absolute;inset:0;width:100%;height:100%}
+  #bud{display:none}
   #sub{position:absolute;left:50%;bottom:56px;transform:translateX(-50%);max-width:min(760px,80vw);background:rgba(18,24,22,.86);color:#fff;
     font:500 17px/1.45 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;padding:10px 16px;border-radius:14px;box-shadow:0 12px 30px -12px rgba(0,0,0,.6);
     display:flex;gap:10px;align-items:flex-start;opacity:0;transition:opacity .25s}
@@ -21,6 +22,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<canvas id="bud"></canvas>
 <div id="sub"><span class="dot"></span><span class="tx" id="tx"></span></div>
 <script>
   const api = window.loopnoteDesktop, cv = document.getElementById("c"), ctx = cv.getContext("2d");
@@ -86,7 +88,13 @@
     });
     if (busy) raf = requestAnimationFrame(draw); else raf = 0;
   }
-  function show(list) { items = (list || []).slice(0, 6); start = performance.now(); fade = 1; clearInterval(fadeT); cancelAnimationFrame(raf); size(); raf = requestAnimationFrame(draw); }
+  function show(list) {
+    list = (list || []).slice(0, 8);
+    // „point“ = kamarád tam doletí; když je kamarád vypnutý, nakreslí se místo toho šipka s popiskem
+    const pts = list.filter((x) => x.type === "point");
+    if (pts.length && BUD.on) { BUD.queue = pts.map(boxCenter); BUD.fly = null; }
+    list = list.flatMap((x) => x.type !== "point" ? [x] : BUD.on ? [] : [{ type: "arrow", box: x.box, color: x.color || "blue" }].concat(x.text ? [{ type: "text", box: x.box, text: x.text, color: x.color || "blue" }] : []));
+    items = list.slice(0, 6); start = performance.now(); fade = 1; clearInterval(fadeT); cancelAnimationFrame(raf); size(); raf = requestAnimationFrame(draw); }
   function clear(slow) {
     clearInterval(fadeT);
     if (!slow) { items = []; draw(); return; }
@@ -98,7 +106,76 @@
     sub.className = "on " + st;
     tx.textContent = text || (T[st] ? (T[st][ui] || T[st].en) : "");
   }
+  /* ===== kamarád u kurzoru ===== */
+  const bc = document.getElementById("bud"), bx = bc.getContext("2d");
+  const BUD = { on: false, x: -100, y: -100, cx: -100, cy: -100, st: "", queue: [], fly: null, hold: 0, say: "", sayT: 0, jobs: 0, raf: 0, last: 0, blink: 0, seen: false };
+  function boxCenter(it) { const b = it.box || [0, 0, 0, 0]; return { x: (b[1] + b[3]) / 2000 * innerWidth, y: (b[0] + b[2]) / 2000 * innerHeight, text: String(it.text || "").slice(0, 30) }; }
+  function bsize() { bc.width = innerWidth * devicePixelRatio; bc.height = innerHeight * devicePixelRatio; }
+  addEventListener("resize", bsize); bsize();
+  function budLoop(now) {
+    const dt = Math.min(0.05, (now - (BUD.last || now)) / 1000); BUD.last = now;
+    let tx = BUD.cx + 22, ty = BUD.cy + 24, pointing = null;
+    // let po bodech: oblouk k cíli, chvíli tam zůstane s popiskem, pak další nebo zpět k myši
+    if (!BUD.fly && BUD.queue.length) { const p = BUD.queue.shift(); BUD.fly = { p, fx: BUD.x, fy: BUD.y, t0: now, dur: 620 + Math.min(500, Math.hypot(p.x - BUD.x, p.y - BUD.y) * 0.35), hold: 2600 }; }
+    if (BUD.fly) {
+      const f = BUD.fly, k = Math.min(1, (now - f.t0) / f.dur), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      const ex = f.p.x + 16, ey = f.p.y + 18, mx = (f.fx + ex) / 2, my = Math.min(f.fy, ey) - 80 - Math.hypot(ex - f.fx, ey - f.fy) * 0.15;
+      BUD.x = (1 - e) * (1 - e) * f.fx + 2 * (1 - e) * e * mx + e * e * ex; BUD.y = (1 - e) * (1 - e) * f.fy + 2 * (1 - e) * e * my + e * e * ey;
+      if (k >= 1) { pointing = f.p; if (!f.at) f.at = now; if (now - f.at > f.hold) BUD.fly = null; }
+    } else { const a = 1 - Math.exp(-dt * 16); BUD.x += (tx - BUD.x) * a; BUD.y += (ty - BUD.y) * a; }
+    budDraw(now, pointing);
+    BUD.raf = requestAnimationFrame(budLoop);
+  }
+  function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+  function bubbleText(c, x, y, text, dark) {
+    c.font = '600 14px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif';
+    const w = Math.min(420, c.measureText(text).width + 20), h = 28; let bx0 = x + 22, by0 = y - 14;
+    if (bx0 + w > innerWidth - 8) bx0 = x - 22 - w; if (by0 < 8) by0 = 8;
+    c.shadowColor = "rgba(0,0,0,.25)"; c.shadowBlur = 10; c.fillStyle = dark ? "rgba(18,24,22,.92)" : "#1f8f6e"; rr(c, bx0, by0, w, h, 10); c.fill(); c.shadowBlur = 0;
+    c.fillStyle = "#fff"; c.fillText(text, bx0 + 10, by0 + 19, w - 20);
+  }
+  function budDraw(now, pointing) {
+    const c = bx; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, bc.width, bc.height); c.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    if (!BUD.seen) return;
+    const st = BUD.st, x = BUD.x, y = BUD.y + (BUD.fly ? 0 : Math.sin(now / 520) * 1.6), R = 13;
+    // ukazovátko: puls v místě a špička od kamaráda k cíli
+    if (pointing) {
+      const ph = ((now - BUD.fly.at) % 1200) / 1200;
+      c.strokeStyle = `rgba(31,143,110,${.55 * (1 - ph)})`; c.lineWidth = 3; c.beginPath(); c.arc(pointing.x, pointing.y, 6 + ph * 22, 0, 7); c.stroke();
+      c.fillStyle = "#1f8f6e"; c.beginPath(); c.moveTo(pointing.x, pointing.y); c.lineTo(x - R * .2, y - R * .95); c.lineTo(x - R * .95, y - R * .2); c.closePath(); c.fill();
+      if (pointing.text) bubbleText(c, x, y, pointing.text, false);
+    }
+    // stín + tělo (kroužek Loopnote se žlutou tečkou)
+    c.fillStyle = "rgba(0,0,0,.16)"; c.beginPath(); c.ellipse(x, y + R + 5, R * .8, 3, 0, 0, 7); c.fill();
+    const ring = st === "listening" ? "#e03131" : st === "speaking" ? "#1c7ed6" : "#1f8f6e";
+    if (st === "listening") { const p = (Math.sin(now / 180) + 1) / 2; c.fillStyle = `rgba(224,49,49,${.12 + .15 * p})`; c.beginPath(); c.arc(x, y, R + 6 + p * 4, 0, 7); c.fill(); }
+    c.fillStyle = "#fff"; c.strokeStyle = ring; c.lineWidth = 4; c.beginPath(); c.arc(x, y, R, 0, 7); c.fill(); c.stroke();
+    const da = st === "thinking" ? now / 260 : -0.75; // při přemýšlení tečka obíhá
+    c.fillStyle = "#f5b800"; c.beginPath(); c.arc(x + Math.cos(da) * R, y + Math.sin(da) * R, 3.6, 0, 7); c.fill();
+    // obličej: oči (mrkají), pusa (při mluvení se hýbe)
+    const look = st === "thinking" ? -2 : 0, blink = (now % 4200) < 120 ? .15 : 1;
+    c.fillStyle = "#1c2420";
+    c.beginPath(); c.ellipse(x - 4.2, y - 2 + look, 1.7, 2.3 * blink, 0, 0, 7); c.fill();
+    c.beginPath(); c.ellipse(x + 4.2, y - 2 + look, 1.7, 2.3 * blink, 0, 0, 7); c.fill();
+    if (st === "speaking") { const o = 1 + 2.4 * Math.abs(Math.sin(now / 95) * Math.sin(now / 37)); c.beginPath(); c.ellipse(x, y + 4.5, 3, o, 0, 0, 7); c.fill(); }
+    else { c.strokeStyle = "#1c2420"; c.lineWidth = 1.6; c.beginPath(); c.arc(x, y + 2.2, 3.4, .25 * Math.PI, .75 * Math.PI); c.stroke(); }
+    // poslouchá: zvukové čárky vedle
+    if (st === "listening") { c.fillStyle = "#e03131"; for (let i = 0; i < 3; i++) { const h = 4 + 6 * Math.abs(Math.sin(now / 140 + i * 1.3)); rr(c, x + R + 7 + i * 5, y - h / 2, 3, h, 1.5); c.fill(); } }
+    // úkoly na pozadí: malá točící se tečka s číslem
+    if (BUD.jobs > 0) { const jx = x - R - 4, jy = y - R - 2; c.fillStyle = "#1c2420"; c.beginPath(); c.arc(jx, jy, 7.5, 0, 7); c.fill(); c.strokeStyle = "#f5b800"; c.lineWidth = 2; c.beginPath(); c.arc(jx, jy, 5, now / 150, now / 150 + 4); c.stroke(); }
+    if (BUD.say && now < BUD.sayT && !pointing) bubbleText(c, x, y, BUD.say, true);
+  }
+  function budOn(on) {
+    BUD.on = on; bc.style.display = on ? "block" : "none";
+    if (on && !BUD.raf) { BUD.last = 0; BUD.raf = requestAnimationFrame(budLoop); }
+    if (!on && BUD.raf) { cancelAnimationFrame(BUD.raf); BUD.raf = 0; BUD.queue = []; BUD.fly = null; }
+  }
   api.onAnnot((m) => {
+    if (m.buddy != null) budOn(!!m.buddy);
+    if (m.cur) { BUD.cx = m.cur[0]; BUD.cy = m.cur[1]; if (!BUD.seen) { BUD.seen = true; BUD.x = BUD.cx + 22; BUD.y = BUD.cy + 24; } }
+    if (m.jobs != null) BUD.jobs = m.jobs;
+    if (m.say) { BUD.say = m.say; BUD.sayT = performance.now() + 5000; }
+    if (m.st) BUD.st = m.st === "off" ? "" : m.st;
     if (m.subs != null) subsOn = !!m.subs;
     if (m.items) show(m.items);
     if (m.clear) clear(m.clear === "slow");

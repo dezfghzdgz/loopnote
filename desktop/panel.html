@@ -157,7 +157,7 @@
     if (text) { const d = document.createElement("div"); d.className = "msg"; d.innerHTML = md(text); m.appendChild(d); }
     for (const a of acts || []) {
       const c = document.createElement("div"); c.className = "act";
-      c.innerHTML = "<span>" + (a.k === "note" ? "📝 " : a.k === "cal" ? "📅 " : "⏱ ") + esc(a.t) + "</span>" + (a.k === "note" ? '<button type="button">' + esc(t[12]) + "</button>" : "");
+      c.innerHTML = "<span>" + (a.k === "note" ? "📝 " : a.k === "cal" ? "📅 " : a.k === "job" ? "⏳ " : "⏱ ") + esc(a.t) + "</span>" + (a.k === "note" ? '<button type="button">' + esc(t[12]) + "</button>" : "");
       if (a.k === "note") c.querySelector("button").onclick = () => api.openNb({ nbId: a.nbId, pi: a.pi });
       m.appendChild(c);
     }

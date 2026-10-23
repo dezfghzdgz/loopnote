@@ -3,13 +3,14 @@
 // Podržení nebo pravý klik na bublinu (nebo Ctrl/Cmd+Shift+Mezerník) = mluvíš s pomocníkem hlasem.
 // V režimu „jen hlas“ nevyskočí žádné okénko: pomocník vidí obrazovku, mluví a kreslí přímo na ni (kroužek, šipka, podtržení, poznámka).
 // Odpověď vyskočí v malém okénku hned vedle zakroužkovaného místa. Sešit se otevře jen přes „Uložit do sešitu“.
+// Kamarád u kurzoru: malý Loopnote jezdí s myší, při mluvení ukazuje, kam kliknout (doletí na místo); úkoly na pozadí hlásí oznámením.
 // Trojklik bublinu schová – vrátí se při dalším otevření Loopnote (ikona, zástupce, lišta u hodin).
 const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, Tray, Menu, nativeImage, session, systemPreferences, Notification } = require("electron");
 const path = require("path");
 
 let win = null, bubble = null, overlay = null, panel = null, tray = null, bubbleOff = false, quitting = false;
 let annot = null, screenTalk = { on: false, sid: 0 }, annotClearT = null;
-let capDisplay = null, busy = false, lang = { ui: "en", loc: "en-US", mode: "screen", subs: true }, reqId = 0, talkWant = 0, overlayTimer = null;
+let capDisplay = null, busy = false, lang = { ui: "en", loc: "en-US", mode: "screen", subs: true, buddy: "always" }, reqId = 0, talkWant = 0, overlayTimer = null;
 const ALL_SPACES = { visibleOnFullScreen: true, skipTransformProcessType: true };
 const BS = 72; // velikost bubliny – pevná, nikdy se nemění
 let drag = null;
@@ -68,6 +69,7 @@ function showBubble() {
   if (!bubble) createBubble();
   keepBubbleOnScreen();
   bubble.showInactive();
+  buddySync();
 }
 // po odpojení monitoru nebo přetažení mimo obrazovku vrátit bublinu na viditelné místo
 function keepBubbleOnScreen() {
@@ -218,6 +220,7 @@ async function toggleScreenTalk() {
   screenTalk = { on: true, sid: Date.now() };
   try { globalShortcut.register("Escape", stopScreenTalk); } catch (e) { /* drží jiná appka */ }
   toAnnot({ st: "listening" });
+  buddySync();
   toMain("talk", { on: true, sid: screenTalk.sid, mode: "screen" });
 }
 function stopScreenTalk() {
@@ -227,8 +230,37 @@ function stopScreenTalk() {
   toMain("talk", { on: false }); toMain("speak", null); bubbleState("");
   if (annot) toAnnot({ st: "off", clear: "slow" });
   hideAnnotSoon();
+  setTimeout(buddySync, 4000); // „jen při mluvení“ – chvíli ještě zůstane (doukazuje)
 }
-function hideAnnotSoon() { clearTimeout(annotClearT); annotClearT = setTimeout(() => { if (annot && !annot.isDestroyed() && !screenTalk.on) annot.hide(); }, 3500); }
+// --- kamarád u kurzoru ---
+let curT = null, lastCur = "", jobsN = 0;
+function buddyWanted() { return !bubbleOff && (lang.buddy === "always" || (lang.buddy === "talk" && screenTalk.on)); }
+function buddySync() {
+  const want = buddyWanted();
+  if (want && !curT) {
+    toAnnot({ buddy: true, jobs: jobsN });
+    curT = setInterval(feedCursor, 16);
+  } else if (!want && curT) {
+    clearInterval(curT); curT = null; lastCur = "";
+    if (annot && !annot.isDestroyed()) annot.webContents.send("annot", { buddy: false });
+    if (!screenTalk.on) hideAnnotSoon();
+  }
+}
+function feedCursor() {
+  if (!annot || annot.isDestroyed()) { clearInterval(curT); curT = null; return; }
+  const c = screen.getCursorScreenPoint();
+  let b = annot.getBounds();
+  // myš přejela na jiný monitor → kamarád (a vrstva) jde s ní, pokud zrovna nic nekreslí
+  if (!screenTalk.on && (c.x < b.x || c.y < b.y || c.x >= b.x + b.width || c.y >= b.y + b.height)) {
+    capDisplay = screen.getDisplayNearestPoint(c); annot.setBounds(capDisplay.bounds); b = annot.getBounds();
+  }
+  const k = (c.x - b.x) + "," + (c.y - b.y);
+  if (k === lastCur) return;
+  lastCur = k;
+  if (!annot.isVisible()) annot.showInactive();
+  annot.webContents.send("annot", { cur: [c.x - b.x, c.y - b.y] });
+}
+function hideAnnotSoon() { clearTimeout(annotClearT); annotClearT = setTimeout(() => { if (annot && !annot.isDestroyed() && !screenTalk.on && !curT) annot.hide(); }, 3500); }
 
 function askMain(sender, req) {
   const id = ++reqId;
@@ -276,7 +308,7 @@ ipcMain.on("talk-event", (_e, ev) => {
   if (panel && !panel.isDestroyed()) panel.webContents.send("talk-event", ev);
   if (screenTalk.on && ev && ev.sid === screenTalk.sid) {
     if (ev.type === "state") {
-      if (ev.st === "off" || ev.st === "error") { screenTalk.on = false; try { globalShortcut.unregister("Escape"); } catch (e) { /* nic */ } toAnnot({ st: ev.st === "error" ? "listening" : "off", text: ev.x || "", clear: "slow" }); if (ev.st === "error") setTimeout(() => { toAnnot({ st: "off" }); hideAnnotSoon(); }, 5000); else hideAnnotSoon(); }
+      if (ev.st === "off" || ev.st === "error") { screenTalk.on = false; try { globalShortcut.unregister("Escape"); } catch (e) { /* nic */ } toAnnot({ st: ev.st === "error" ? "listening" : "off", text: ev.x || "", clear: "slow" }); if (ev.st === "error") setTimeout(() => { toAnnot({ st: "off" }); hideAnnotSoon(); }, 5000); else hideAnnotSoon(); setTimeout(buddySync, 4000); }
       else if (ev.st === "listening") toAnnot({ st: "listening" });
       else if (ev.st === "heard") toAnnot({ st: "heard", text: "„" + (ev.x || "") + "“" });
       else if (ev.st === "thinking") toAnnot({ st: "thinking" });
@@ -288,6 +320,7 @@ ipcMain.on("talk-event", (_e, ev) => {
   if (ev && ev.type === "speaking") bubbleState(ev.on ? "speaking" : "");
 });
 ipcMain.handle("screen-shot", async () => {
+  if (screenTalk.on) { capDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()); if (annot && !annot.isDestroyed()) annotWin(); }
   const disp = capDisplay || screen.getPrimaryDisplay();
   const hadAnnot = annot && !annot.isDestroyed() && annot.isVisible();
   if (hadAnnot) { annot.setOpacity(0); await wait(60); } // vlastní kresba na snímek nepatří
@@ -317,7 +350,19 @@ ipcMain.on("explain-result", (_e, res) => {
   pending.delete(res.id);
   if (s && !s.isDestroyed()) s.send("panel-answer", res);
 });
-ipcMain.on("hello", (_e, l) => { if (!l || !l.ui) return; const m0 = lang.mode; lang = { ui: l.ui, loc: l.loc || lang.loc, mode: l.mode || lang.mode, subs: l.subs !== false }; if (m0 !== lang.mode) updateTray(); });
+ipcMain.on("hello", (_e, l) => { if (!l || !l.ui) return; const m0 = lang.mode; const b0 = lang.buddy; lang = { ui: l.ui, loc: l.loc || lang.loc, mode: l.mode || lang.mode, subs: l.subs !== false, buddy: l.buddy || lang.buddy }; if (m0 !== lang.mode || b0 !== lang.buddy) updateTray(); buddySync(); });
+// úkoly na pozadí: počet běžících (kamarád ukáže točící se tečku) a oznámení, když je hotovo
+ipcMain.on("jobs", (_e, n) => { jobsN = +n || 0; if (annot && !annot.isDestroyed()) annot.webContents.send("annot", { jobs: jobsN }); if (tray) tray.setToolTip(jobsN ? `Loopnote – ${jobsN} ⏳` : "Loopnote"); });
+ipcMain.on("notify", (_e, d) => {
+  if (!d) return;
+  if (curT && d.say) toAnnot({ say: String(d.say).slice(0, 120) });
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: String(d.title || "Loopnote"), body: String(d.body || "").slice(0, 240), icon: path.join(__dirname, "build", "tray.png") });
+    n.on("click", () => { showMain(); if (d.nbId) toMain("open-nb", { nbId: d.nbId, pi: d.pi || 0 }); });
+    n.show();
+  } catch (e) { console.error(e); }
+});
 ipcMain.on("panel-save", (_e, d) => {
   if (panel) panel.close();
   showMain();
@@ -339,7 +384,7 @@ ipcMain.on("bubble-drag", (_e, phase) => {
 ipcMain.on("bubble-move", (_e, dx, dy) => { if (!bubble) return; const b = bubble.getBounds(); placeBubble(b.x + dx, b.y + dy); clearTimeout(bubble._kt); bubble._kt = setTimeout(keepBubbleOnScreen, 400); });
 ipcMain.on("bubble-click", () => { if (screenTalk.on) return stopScreenTalk(); startCircle(); });
 ipcMain.on("bubble-off", () => {
-  bubbleOff = true; if (bubble) bubble.hide();
+  bubbleOff = true; if (bubble) bubble.hide(); buddySync();
   const cs = lang.ui === "cs";
   try { new Notification({ title: "Loopnote", body: cs ? "Bublina je schovaná. Vrátí se, když znovu otevřeš Loopnote (ikona u hodin)." : "Bubble hidden. It comes back when you open Loopnote again (icon near the clock)." }).show(); } catch (e) { /* nic */ }
 });
@@ -362,6 +407,8 @@ function updateTray() {
     { type: "separator" },
     { label: cs ? "Mluvení: jen hlas a kreslení na obrazovku" : "Talking: voice + drawing on screen", type: "radio", checked: lang.mode === "screen", click: () => setMode("screen") },
     { label: cs ? "Mluvení: s okénkem" : "Talking: with a panel", type: "radio", checked: lang.mode !== "screen", click: () => setMode("panel") },
+    { type: "separator" },
+    { label: cs ? "Kamarád u kurzoru" : "Cursor buddy", type: "checkbox", checked: lang.buddy !== "off", click: (it) => { lang.buddy = it.checked ? "always" : "off"; toMain("set-pref", { buddy: lang.buddy }); buddySync(); } },
     { type: "separator" },
     { label: "Quit", click: () => { quitting = true; app.quit(); } },
   ]));
