@@ -3529,7 +3529,7 @@ async function talkLoop(ask,ui){if(!HAS_API){const m=L('Mluvení zatím nejde �
     try{text=await ask(q,t=>ss.feed(t))}catch(e){ss.end('');stopSpeak();if(!live())break;set('error',errCopy(e&&e.code));break}
     if(!live()){ss.end('');break}if(!text){ss.end('');stopSpeak();continue}ss.end(text);set('speaking',text);await ss.done}
   if(TALK.sid===sid){TALK.on=false;vxMicOff();set('off')}}
-function talkStop(){const u=TALK.ui,was=TALK.on;TALK.on=false;TALK.ui=null;TALK.sid++;if(VX.cancel)VX.cancel();stopSpeak();vxMicOff();TALK.state='';if(was&&u)u('off')}
+function talkStop(){const u=TALK.ui,was=TALK.on;TALK.on=false;TALK.ui=null;TALK.sid++;if(typeof LIVE!=='undefined'&&LIVE.stop)LIVE.stop();if(VX.cancel)VX.cancel();stopSpeak();vxMicOff();TALK.state='';if(was&&u)u('off')}
 
 /* rozhovor v panelu „Zeptej se“ (zná všechny sešity a umí do nich zapisovat) */
 (function notesTalk(){const form=$('#notesAsk');if(!form||!HAS_API)return;
@@ -3563,11 +3563,19 @@ function deskTalkHTML(){if(!window.loopnoteDesktop)return '';const m=S.prefs.des
     <div class="opts c3"><button type="button" class="opt" data-dbuddy="always" aria-pressed="${bd==='always'}"><b>${L('Pořád','Always')}</b><small>${L('Malý Loopnote jezdí s myší, při mluvení ukazuje, kam kliknout.','A tiny Loopnote rides along with your mouse and points where to click.')}</small></button>
     <button type="button" class="opt" data-dbuddy="talk" aria-pressed="${bd==='talk'}"><b>${L('Jen při mluvení','Only while talking')}</b><small>${L('Objeví se, když s ním mluvíš.','Shows up when you talk to it.')}</small></button>
     <button type="button" class="opt" data-dbuddy="off" aria-pressed="${bd==='off'}"><b>${L('Vypnuto','Off')}</b><small>${L('Ukazuje jen šipkami a kroužky.','Points with arrows and circles only.')}</small></button></div>
+    <span class="eyebrow" style="margin-top:6px">${L('„Hej Loopnote“','“Hey Loopnote”')}</span>
+    <button type="button" class="toggle" data-dwake aria-pressed="${!!S.prefs.wake&&!!(typeof wkLoad==='function'&&wkLoad())}"><span><b>${L('Zavolat hlasem','Call it by voice')}</b><small>${L('Řekni „Hej Loopnote“, pípne a poslouchá. Rozpoznává se jen v tomhle počítači – nic se neposílá, dokud ho nezavoláš.','Say “Hey Loopnote”, it beeps and listens. Recognised only on this computer – nothing is sent until you call it.')}</small></span><span class="knob"></span></button>
+    <div class="row"><button type="button" class="btn" data-dwaketrain>🎙️ ${typeof wkLoad==='function'&&wkLoad()?L('Znovu naučit můj hlas','Re-teach my voice'):L('Naučit můj hlas (3× říct)','Teach my voice (say it 3×)')}</button>
+      <select class="sel" data-dwakesens aria-label="${L('Citlivost','Sensitivity')}" style="flex:1">${[['low',L('Méně citlivé (méně omylů)','Less sensitive (fewer mistakes)')],['mid',L('Normální citlivost','Normal sensitivity')],['high',L('Citlivější (slyší i potichu)','More sensitive (hears quiet speech)')]].map(([k,t])=>`<option value="${k}" ${(S.prefs.wakeSens||'mid')===k?'selected':''}>${t}</option>`).join('')}</select></div>
+    <span class="eyebrow" style="margin-top:6px">${L('Rozhovor','Conversation')}</span>
+    <button type="button" class="toggle" data-dlive aria-pressed="${S.prefs.live!==false}"><span><b>${L('Rozhovor jako v telefonu','Talk like on a phone call')}</b><small>${L('Odpovídá skoro hned a dá se mu skočit do řeči (Gemini Live). Když to nepůjde, přepne se sám na běžný režim.','Answers almost instantly and you can interrupt (Gemini Live). Falls back automatically if unavailable.')}</small></span><span class="knob"></span></button>
     <button type="button" class="toggle" data-drecap aria-pressed="${S.prefs.recap!==false}"><span><b>${L('Po rozhovoru uložit shrnutí a kartičky','Save a recap and review cards after talking')}</b><small>${L('Co jste probrali, se zapíše do sešitu a důležité věci přijdou k opakování.','What you covered goes into a notebook and the key points into your reviews.')}</small></span><span class="knob"></span></button>
     <div class="row"><button type="button" class="btn" data-dtest>✏️ ${L('Vyzkoušet kreslení na obrazovku','Test drawing on screen')}</button><button type="button" class="toggle" data-dack aria-pressed="${S.prefs.ack!==false}" style="flex:1"><span><b>${L('Hned potvrdit („jasně, podívám se“)','Acknowledge right away (“sure, let me look”)')}</b></span><span class="knob"></span></button></div>
     <p class="fine" style="margin:0">${L('Mluvit začneš podržením bubliny, pravým klikem nebo Ctrl+Shift+Mezerník. Ukončíš klikem na bublinu nebo Esc.','Start talking by holding the bubble, right-clicking it or Ctrl+Shift+Space. Stop with a click on the bubble or Esc.')} ${L('Když chceš něco delšího (podobné příklady, test, zápis), řekni to – připraví to na pozadí a dá vědět.','Ask for something longer (similar exercises, a test, notes) and it gets made in the background – you’ll be told when it’s ready.')}</p></div>`}
 document.addEventListener('click',e=>{if(e.target.closest('[data-dtest]')&&window.loopnoteDesktop){window.loopnoteDesktop.drawTest({text:L('Takhle ti budu ukazovat přímo na obrazovce.','This is how I will point things out on your screen.'),items:[{type:'point',box:[200,140,240,260],text:L('tady to je','right here')},{type:'circle',box:[380,330,560,560],color:'red'},{type:'arrow',box:[380,330,560,560],color:'blue'},{type:'underline',box:[620,300,660,700],color:'green'},{type:'check',box:[620,700,660,720],color:'green'},{type:'text',box:[300,600,330,700],text:L('tady!','here!'),color:'red'}]});return}
-  const b=e.target.closest('[data-dtalk],[data-dsubs],[data-dack],[data-dbuddy],[data-drecap]');if(!b)return;if('drecap' in b.dataset)S.prefs.recap=S.prefs.recap===false;else if(b.dataset.dbuddy)S.prefs.buddy=b.dataset.dbuddy;else if(b.dataset.dtalk)S.prefs.deskTalk=b.dataset.dtalk;else if('dack' in b.dataset){S.prefs.ack=S.prefs.ack===false;VX.ackKey=null}else S.prefs.deskSubs=!(S.prefs.deskSubs!==false);save();
+  if(e.target.closest('[data-dwaketrain]')){wakeTrain();return}
+  const b=e.target.closest('[data-dtalk],[data-dsubs],[data-dack],[data-dbuddy],[data-drecap],[data-dlive],[data-dwake]');if(!b)return;
+  if('dwake' in b.dataset){if(!wkLoad()){wakeTrain();return}S.prefs.wake=!S.prefs.wake;save();wkSync();const g=document.getElementById('deskTalkG');if(g)g.outerHTML=deskTalkHTML();return}if('dlive' in b.dataset){S.prefs.live=S.prefs.live===false;LIVE.broken=0}else if('drecap' in b.dataset)S.prefs.recap=S.prefs.recap===false;else if(b.dataset.dbuddy)S.prefs.buddy=b.dataset.dbuddy;else if(b.dataset.dtalk)S.prefs.deskTalk=b.dataset.dtalk;else if('dack' in b.dataset){S.prefs.ack=S.prefs.ack===false;VX.ackKey=null}else S.prefs.deskSubs=!(S.prefs.deskSubs!==false);save();
   window.__deskHello&&window.__deskHello();const g=document.getElementById('deskTalkG');if(g)g.outerHTML=deskTalkHTML()},true);
 function VX_ONB(){const cur=vxVoice();return `<h1>${L('Hlas pomocníka','Your helper\'s voice')}</h1><p class="lead">${L('Vyber si, jak na tebe bude pomocník mluvit. Ťukni na hlas a hned ho uslyšíš.','Pick how your helper sounds. Tap a voice to hear it.')}</p>
   <div class="opts">${CLOUD_VOICES.slice(0,6).map(([k,d])=>`<button type="button" class="opt" data-cvoice="${k}" aria-pressed="${cur===k}"><b>${k}</b><small>${esc(d)}</small></button>`).join('')}</div>
@@ -3594,11 +3602,14 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-aich
     const sec=((Date.now()-t0)/1000).toFixed(1);
     txt=(d.ok?'✅ '+L('AI funguje','AI works')+' ('+d.model+', '+sec+' s)':'❌ '+L('AI nefunguje','AI is not working'))+'\n'+
       (d.ok?(d.voice==='ok'?'✅ '+L('Hlas funguje','Voice works'):'⚠️ '+L('Hlas: ','Voice: ')+d.voice)+'\n':'')+
+      (d.live?(/^ok/.test(d.live)?'✅ '+L('Rozhovor jako v telefonu (Live): ','Phone-call mode (Live): ')+d.live:'⚠️ Live: '+d.live+(typeof LIVE!=='undefined'&&LIVE.lastErr?' · '+LIVE.lastErr:''))+'\n':'')+
       (d.detail?d.detail+'\n':'')+
       (d.tried||[]).map(x=>'· '+x.model+': '+x.status+(x.msg?' – '+x.msg:'')+' ('+x.ms+' ms)').join('\n');
     if((d.tried||[]).some(x=>x.status===429))txt+='\n\n'+L('429 = vyčerpaný limit u Googlu. Řešení: aistudio.google.com → Billing → zapnout placený tarif (Tier 1).','429 = Google quota used up. Fix: aistudio.google.com → Billing → enable a paid tier (Tier 1).')}
   catch(err){txt='❌ '+(err&&err.code==='offline'?L('Server s AI neodpověděl (nebo není nasazená funkce „ai“).','The AI server didn’t respond (or the “ai” function isn’t deployed).'):errCopy(err&&err.code))}
   b.classList.remove('vx-loading');out.textContent=txt},true);
+
+document.addEventListener('change',e=>{const s=e.target.closest('[data-dwakesens]');if(!s)return;S.prefs.wakeSens=s.value;save()},true);
 
 /* ===== Úkoly na pozadí: „připrav mi podobné příklady“ – pomocník řekne, že to udělá, a mezitím se dá dál pracovat ===== */
 const UKOL_RULE=()=>`ÚKOLY NA POZADÍ: Když student chce, abys něco delšího VYTVOŘIL (podobné příklady na procvičení, cvičný test, zápis nebo výpisky z toho, co je na obrazovce, shrnutí kapitoly, otázky ke zkoušení, slovíčka…), NEPIŠ to do odpovědi. Jen krátce a vesele řekni, že to připravíš na pozadí, že mezitím může dělat cokoli jiného a že dáš vědět, až to bude (1–2 věty). Na úplný konec odpovědi pak přidej řádek přesně ve tvaru
@@ -3684,6 +3695,191 @@ ${h.map(x=>(x.role==='user'?'STUDENT: ':'POMOCNÍK: ')+String(x.content).slice(0
 /* minutky → kamarád ukazuje kolem sebe, kolik zbývá (soustředění / pauza) */
 (function deskTimers(){const D=window.loopnoteDesktop;if(!D||!D.timers)return;let last='';
   setInterval(()=>{try{const t=TMRAW().filter(x=>!x.del&&x.end>Date.now()).sort((a,b)=>a.end-b.end)[0];const v=t?JSON.stringify({end:t.end,total:t.mins*60e3,label:t.label}):'';if(v!==last){last=v;D.timers(t?{end:t.end,total:t.mins*60e3,label:t.label}:null)}}catch(e){}},2000)})();
+
+/* ===== Rozhovor „jako v telefonu“ (Gemini Live): mluví se plynule, odpověď začne hned a dá se skočit do řeči =====
+   Server vydá krátkodobý klíč na jedno spojení; appka se pak spojí přímo s Googlem (WebSocket).
+   Když Live nejde (model, limit, síť), rozhovor se sám přepne na běžný režim – uživatel nic neřeší. */
+const LIVE={stop:null,broken:0,lastErr:'',url:(window.KROUZEK&&window.KROUZEK.liveUrl)||'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained'};
+function liveOn(){return S.prefs.live!==false&&HAS_API&&typeof WebSocket!=='undefined'&&Date.now()-LIVE.broken>10*60e3}
+function b64Bytes(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)}
+/* nástroje, které Live model volá místo značek v textu (mluví hlasem, text nepíše) */
+const LIVE_TOOLS=[
+  {name:'draw',description:'Draw on the student\'s screen while you talk: point (the Loopnote buddy flies there – best for WHERE something is / where to click), circle, underline, arrow, box, check (correct), cross (mistake), text (short handwritten note). Coordinates are [ymin,xmin,ymax,xmax] in 0–1000 relative to the LATEST screen image. Call it right before you talk about the thing.',
+    parameters:{type:'OBJECT',properties:{items:{type:'ARRAY',items:{type:'OBJECT',properties:{type:{type:'STRING',enum:['point','circle','underline','arrow','box','check','cross','text']},box:{type:'ARRAY',items:{type:'NUMBER'}},color:{type:'STRING',enum:['red','green','blue','yellow']},text:{type:'STRING'}},required:['type','box']}}},required:['items']}},
+  {name:'write_note',description:'Write a note into one of the student\'s notebooks (when they ask you to note/save/write something down). Content in Markdown, math in $…$.',
+    parameters:{type:'OBJECT',properties:{notebook:{type:'STRING'},title:{type:'STRING'},content:{type:'STRING'}},required:['notebook','content']}},
+  {name:'add_calendar',description:'Add a deadline/test/event to the calendar; the app reminds the student the day before and on the day.',
+    parameters:{type:'OBJECT',properties:{title:{type:'STRING'},kind:{type:'STRING',enum:['task','test','event']},date:{type:'STRING',description:'YYYY-MM-DD'},time:{type:'STRING',description:'HH:MM or empty'},notebook:{type:'STRING'}},required:['title','kind','date']}},
+  {name:'set_timer',description:'Start a timer (focus session, break, reminder in N minutes).',
+    parameters:{type:'OBJECT',properties:{minutes:{type:'NUMBER'},label:{type:'STRING'}},required:['minutes']}},
+  {name:'background_task',description:'Create something longer in the background (similar practice problems, a practice test, notes or a summary of what is on screen, questions). It is saved into a notebook and the student gets notified. Just say you are on it.',
+    parameters:{type:'OBJECT',properties:{task:{type:'STRING'},notebook:{type:'STRING'},title:{type:'STRING'},kind:{type:'STRING',enum:['practice','test','notes','summary','questions']}},required:['task']}}];
+function liveSys(){const now=new Date();const nbs=S.notebooks.filter(n=>!n.deleted).map(n=>n.title).slice(0,30).join(', ');
+  const up=(typeof agUpcoming==='function'?agUpcoming():[]).slice(0,8).map(a=>`${isoDay(a.date)}${a.time?' '+a.time:''} ${a.title}`).join('; ');
+  return `${TEACHER()}
+${profileCtx(null)}
+JAK MLUVIT: ${styleGuide()}
+Mluvíš se studentem hlasem jako v telefonu, zatímco se učí u počítače. Vidíš jeho obrazovku (posílá se ti obrázek, když začne mluvit). Mluv přirozeně, krátce (2–5 vět), jako kamarád, co sedí vedle a umí to vysvětlit. Mluv jazykem kód ${LANG()}. Když ti skočí do řeči, přestaň a poslouchej.
+UKAZUJ: kdykoli mluvíš o něčem, co je vidět na obrazovce, zavolej nástroj draw (point = kamarád doletí na místo, nejlepší pro „kde je / kam kliknout“; circle/underline/arrow/check/cross/text). Souřadnice 0–1000 podle posledního obrázku.
+UČ, NEŘEŠ ZA NĚJ: u úlohy, kterou má umět sám, neprozrazuj hned výsledek – naveď ho dalším krokem a ukaž, kde je chyba. „Vyzkoušej mě“ = ptej se po jedné otázce, počkej na odpověď, řekni, jestli je dobře a proč. Když něco nechápe, vysvětli to jinak a jednodušeji.
+NÁSTROJE: zapsat do sešitu = write_note; termín/test = add_calendar (dnes je ${isoDay(now)}, ${now.toLocaleDateString('cs-CZ',{weekday:'long'})}); minutka = set_timer; delší věc (podobné příklady, test, zápis, shrnutí) = background_task a jen řekni, že na tom pracuješ. Nikdy netvrď, že něco z toho neumíš.
+Jeho sešity: ${nbs||'–'}.${up?' Nejbližší termíny: '+up+'.':''}`}
+/* jedna Live relace; vrací 'fail' (nejde – použij běžný režim) nebo 'ok' (proběhla a skončila) */
+async function liveSession(o){let tok;
+  try{tok=await vxApi({purpose:'live',messages:[{role:'user',content:'live'}]},null,15000)}catch(e){LIVE.lastErr='token: '+(AI_DETAIL||(e&&e.code)||'');return 'fail'}
+  if(!tok||!tok.token){LIVE.lastErr='no token';return 'fail'}
+  return new Promise(resolve=>{let ws,ready=false,ended=false,turns=0,qBuf='',aBuf='',speakingNow=false,lastFrame=0,talkingT=0,maxT=0;
+    try{ws=new WebSocket(LIVE.url+'?access_token='+encodeURIComponent(tok.token))}catch(e){LIVE.lastErr='ws '+e;resolve('fail');return}
+    const out=new (window.AudioContext||window.webkitAudioContext)();let head=0;const srcs=new Set();
+    let mctx=null,proc=null,msrc=null,acc=[],accN=0,noise=.006,quiet=0;
+    const setupT=setTimeout(()=>{if(!ready){LIVE.lastErr='setup timeout';finish('fail')}},9000);
+    const send=m=>{try{if(ws.readyState===1)ws.send(JSON.stringify(m))}catch(e){}};
+    function stopAudio(){srcs.forEach(s=>{try{s.stop()}catch(e){}});srcs.clear();head=0}
+    function finish(r,msg){if(ended)return;ended=true;clearTimeout(setupT);clearTimeout(maxT);clearInterval(talkingT);try{ws.close(1000)}catch(e){}
+      try{proc&&proc.disconnect();msrc&&msrc.disconnect()}catch(e){}try{mctx&&mctx.close()}catch(e){}vxMicOff();stopAudio();try{out.close()}catch(e){}
+      if(LIVE.stop===stopFn)LIVE.stop=null;if(r==='fail')LIVE.broken=Date.now();if(msg)o.ui('error',msg);resolve(r)}
+    const stopFn=()=>finish('ok');LIVE.stop=stopFn;
+    // obrazovka: snímek na začátku a vždy, když student začne mluvit (ne častěji než za 2,5 s)
+    async function frame(force){const n=Date.now();if(!force&&n-lastFrame<2500)return;lastFrame=n;try{const url=await o.frame();if(!url||ended)return;
+        const im=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});const k=Math.min(1,1280/Math.max(im.naturalWidth,im.naturalHeight));
+        const cv=document.createElement('canvas');cv.width=Math.round(im.naturalWidth*k);cv.height=Math.round(im.naturalHeight*k);cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);
+        send({realtimeInput:{video:{data:cv.toDataURL('image/jpeg',.7).split(',')[1],mimeType:'image/jpeg'}}})}catch(e){}}
+    async function micStart(){let st;try{st=await vxMic()}catch(e){finish('ok',L('Nemám přístup k mikrofonu. Povol ho v nastavení systému.','No microphone access. Allow it in your system settings.'));return}
+      mctx=new (window.AudioContext||window.webkitAudioContext)();const sr=mctx.sampleRate,step=sr/16000;msrc=mctx.createMediaStreamSource(st);proc=mctx.createScriptProcessor(4096,1,1);
+      const g=mctx.createGain();g.gain.value=0;msrc.connect(proc);proc.connect(g);g.connect(mctx.destination);let frac=0;
+      proc.onaudioprocess=e=>{if(ended)return;const f=e.inputBuffer.getChannelData(0);let sum=0;for(let i=0;i<f.length;i++)sum+=f[i]*f[i];const rms=Math.sqrt(sum/f.length);o.ui('level',rms);
+        // začátek řeči → poslat aktuální obrazovku (aby AI viděla, o čem mluví)
+        if(rms>Math.max(.02,noise*3)){if(quiet>4)frame(false);quiet=0}else{quiet++;noise=noise*.97+rms*.03}
+        // převzorkování na 16 kHz, 16bit PCM
+        const outN=Math.max(0,Math.ceil((f.length-frac)/step));const pcm=new Int16Array(outN);for(let i=0;i<outN;i++){const x=f[Math.min(f.length-1,Math.floor(frac+i*step))];pcm[i]=Math.max(-32768,Math.min(32767,x*32767))}
+        frac=(frac+outN*step)-f.length;acc.push(pcm);accN+=pcm.length;
+        if(accN>=1600){const all=new Int16Array(accN);let p=0;for(const a of acc){all.set(a,p);p+=a.length}acc=[];accN=0;
+          send({realtimeInput:{audio:{data:b64Bytes(new Uint8Array(all.buffer)),mimeType:'audio/pcm;rate=16000'}}})}}}
+    function play(b64,mime){const rate=+((String(mime||'').match(/rate=(\d+)/)||[])[1])||24000;const by=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));const i16=new Int16Array(by.buffer,0,by.length>>1);
+      const buf=out.createBuffer(1,i16.length,rate);const ch=buf.getChannelData(0);for(let i=0;i<i16.length;i++)ch[i]=i16[i]/32768;
+      const s=out.createBufferSource();s.buffer=buf;s.connect(out.destination);const t=Math.max(out.currentTime+.03,head);s.start(t);head=t+buf.duration;srcs.add(s);s.onended=()=>srcs.delete(s);
+      if(!speakingNow){speakingNow=true;o.ui('speaking',aBuf)}}
+    async function tool(fc){let res='ok';try{res=await o.tool(fc.name,fc.args||{})||'ok'}catch(e){res='error: '+(e&&e.message||e)}
+      send({toolResponse:{functionResponses:[{id:fc.id,name:fc.name,response:{result:String(res)}}]}})}
+    ws.onopen=()=>{send({setup:{model:'models/'+(tok.model||'gemini-3.8-live'),
+      generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:vxVoice()}}}},
+      systemInstruction:{parts:[{text:o.sys}]},tools:[{functionDeclarations:LIVE_TOOLS}],
+      inputAudioTranscription:{},outputAudioTranscription:{},contextWindowCompression:{slidingWindow:{}}}})};
+    ws.onerror=()=>{};
+    ws.onclose=ev=>{if(ended)return;LIVE.lastErr='closed '+ev.code+' '+String(ev.reason||'').slice(0,160);
+      if(!ready)finish('fail');else finish('ok',ev.code===1000||ev.code===1005?null:L('Spojení s pomocníkem se přerušilo.','The connection to the helper dropped.')+' ('+ev.code+')')};
+    ws.onmessage=async ev=>{let m;try{m=JSON.parse(typeof ev.data==='string'?ev.data:await ev.data.text())}catch(e){return}if(ended)return;
+      if(m.setupComplete){ready=true;clearTimeout(setupT);o.ui('listening');await micStart();frame(true);
+        maxT=setTimeout(()=>finish('ok'),(S.profile.plan==='plus'?30:15)*60e3); // jedna relace max 15 min (Plus 30)
+        talkingT=setInterval(()=>{if(speakingNow&&!srcs.size&&out.currentTime>=head){speakingNow=false;o.ui('listening')}},250);return}
+      const sc=m.serverContent;
+      if(sc){if(sc.inputTranscription&&sc.inputTranscription.text){qBuf+=sc.inputTranscription.text;o.ui('heard',qBuf.trim())}
+        if(sc.interrupted){stopAudio();speakingNow=false;aBuf='';o.ui('listening')}
+        for(const p of (sc.modelTurn&&sc.modelTurn.parts)||[]){if(p.inlineData&&/audio/.test(p.inlineData.mimeType||'audio'))play(p.inlineData.data,p.inlineData.mimeType)}
+        if(sc.outputTranscription&&sc.outputTranscription.text){aBuf+=sc.outputTranscription.text;o.partial(aBuf.trim())}
+        if(sc.turnComplete){turns++;if(qBuf.trim()||aBuf.trim())o.turn(qBuf.trim(),aBuf.trim());qBuf='';aBuf=''}}
+      if(m.toolCall)for(const fc of m.toolCall.functionCalls||[])tool(fc);
+      if(m.goAway)setTimeout(()=>finish('ok'),1500)};
+  })}
+/* nástroje → stejné akce jako v běžném režimu */
+async function liveTool(name,a){const D=window.loopnoteDesktop;
+  if(name==='draw'){const it=drawItems('[[KRESLI '+JSON.stringify({items:a.items||[]})+']]');if(it.length&&D&&D.draw)D.draw({items:it});return it.length?'drawn':'nothing to draw'}
+  if(name==='write_note'){const r=zapisFromText(`[[ZAPIS ${JSON.stringify({notebook:a.notebook||null,title:a.title||''})}]]\n${a.content||''}\n[[/ZAPIS]]`,null);if(r.length)zapisConfirm(r);return r.length?'saved to '+r[0].nb.title:'nothing saved'}
+  if(name==='add_calendar'){const r=agHandle(`[[KALENDAR ${JSON.stringify({title:a.title,kind:a.kind||'task',date:a.date,time:a.time||null,notebook:a.notebook||null})}]]`,'',null)||[];return r.length?'added':'not added (check the date)'}
+  if(name==='set_timer'){agHandle(`[[TIMER ${JSON.stringify({minutes:+a.minutes||0,label:a.label||''})}]]`,'',null);return 'timer running'}
+  if(name==='background_task'){jobRun({task:a.task,notebook:a.notebook||null,title:a.title||'',kind:a.kind||'notes'},SHOT_LAST);return 'started; the student will be notified when done'}
+  return 'unknown tool'}
+/* hlasový režim na ploše přes Live; když nejde, běžný režim (classic) */
+async function deskLive(sid,hist,classic){const D=window.loopnoteDesktop;const my=++TALK.sid;TALK.on=true;TALK.ui=null;let lp=0;
+  const ui=(st,x)=>{if(st==='level')return;if(st==='listening')D.drawClear(true);D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x})};
+  ui('thinking',L('Připojuji…','Connecting…'));
+  const r=await liveSession({sys:liveSys(),tool:liveTool,ui,
+    frame:async()=>{const sh=await D.screenShot();SHOT_LAST=sh&&sh.url;return SHOT_LAST},
+    partial:t=>{const n=Date.now();if(n-lp>120){lp=n;D.talkEvent({sid,type:'partial',text:t})}},
+    turn:(q,a)=>{hist.push({role:'user',content:q||'…'},{role:'assistant',content:a||'…'});DESK_MEM.t=Date.now();D.talkEvent({sid,type:'answer',q,text:a})}});
+  if(TALK.sid!==my||!TALK.on)return; // ukončil to student
+  TALK.on=false;
+  if(r==='fail'){console.info('[Loopnote] Live nejde, běžný režim:',LIVE.lastErr);classic();return}
+  ui('off');deskRecapSoon()}
+
+/* ===== „Hej Loopnote“ – zavolání hlasem bez klávesy =====
+   Běží celé v počítači: appka si 3× poslechne, jak to říkáš (tvůj hlas, tvůj mikrofon), a pak porovnává každou krátkou
+   promluvu s touto nahrávkou (MFCC + DTW). Nic se neposílá na internet, dokud ji nezavoláš. */
+const WK={sr:16000,on:false,ctx:null,stream:null,proc:null,tpl:null,busy:false,cool:0};
+/* --- výpočet znaků řeči (MFCC) --- */
+const WK_MEL=(()=>{const n=512,sr=16000,nf=26,lo=20,hi=7600;const mel=f=>1127*Math.log(1+f/700),inv=m=>700*(Math.exp(m/1127)-1);
+  const pts=[];for(let i=0;i<nf+2;i++)pts.push(Math.floor((n+1)*inv(mel(lo)+(mel(hi)-mel(lo))*i/(nf+1))/sr));
+  const fb=[];for(let j=1;j<=nf;j++){const row=new Float32Array(n/2+1);for(let k=pts[j-1];k<pts[j];k++)row[k]=(k-pts[j-1])/Math.max(1,pts[j]-pts[j-1]);for(let k=pts[j];k<pts[j+1];k++)row[k]=(pts[j+1]-k)/Math.max(1,pts[j+1]-pts[j]);fb.push(row)}
+  const dct=[];for(let i=0;i<13;i++){const r=new Float32Array(nf);for(let j=0;j<nf;j++)r[j]=Math.cos(Math.PI*i*(j+.5)/nf);dct.push(r)}
+  const ham=new Float32Array(400);for(let i=0;i<400;i++)ham[i]=.54-.46*Math.cos(2*Math.PI*i/399);return {fb,dct,ham}})();
+function wkFFT(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j&b;b>>=1)j^=b;j^=b;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]]}}
+  for(let len=2;len<=n;len<<=1){const a=-2*Math.PI/len,wr=Math.cos(a),wi=Math.sin(a);for(let i=0;i<n;i+=len){let cr=1,ci=0;for(let j=0;j<len/2;j++){const ur=re[i+j],ui=im[i+j],vr=re[i+j+len/2]*cr-im[i+j+len/2]*ci,vi=re[i+j+len/2]*ci+im[i+j+len/2]*cr;
+    re[i+j]=ur+vr;im[i+j]=ui+vi;re[i+j+len/2]=ur-vr;im[i+j+len/2]=ui-vi;const t=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=t}}}}
+function wkMfcc(x){const {fb,dct,ham}=WK_MEL,out=[];const re=new Float32Array(512),im=new Float32Array(512);
+  for(let s=0;s+400<=x.length;s+=160){re.fill(0);im.fill(0);for(let i=0;i<400;i++)re[i]=(x[s+i]-(i?.97*x[s+i-1]:0))*ham[i];wkFFT(re,im);
+    const pw=new Float32Array(257);for(let k=0;k<257;k++)pw[k]=(re[k]*re[k]+im[k]*im[k])/512;
+    const le=fb.map(r=>{let e=1e-10;for(let k=0;k<257;k++)e+=r[k]*pw[k];return Math.log(e)});
+    out.push(dct.map(r=>{let v=0;for(let j=0;j<26;j++)v+=r[j]*le[j];return v}))}
+  // odečíst průměr (jiný mikrofon / hlasitost) a zahodit celkovou hlasitost (c0)
+  if(!out.length)return out;const mu=new Array(13).fill(0);out.forEach(f=>f.forEach((v,i)=>mu[i]+=v/out.length));
+  return out.map(f=>f.slice(1).map((v,i)=>v-mu[i+1]))}
+/* DTW se zúženým pásem, výsledek normalizovaný délkou */
+function wkDtw(a,b){const n=a.length,m=b.length;if(!n||!m)return 1e9;const band=Math.max(Math.abs(n-m),Math.round(Math.max(n,m)*.35));const INF=1e18;
+  let prev=new Float64Array(m+1).fill(INF),cur=new Float64Array(m+1);prev[0]=0;
+  for(let i=1;i<=n;i++){cur.fill(INF);const lo=Math.max(1,Math.round(i*m/n)-band),hi=Math.min(m,Math.round(i*m/n)+band);
+    for(let j=lo;j<=hi;j++){let d=0;const p=a[i-1],q=b[j-1];for(let k=0;k<p.length;k++){const t=p[k]-q[k];d+=t*t}d=Math.sqrt(d);cur[j]=d+Math.min(prev[j],prev[j-1],cur[j-1])}[prev,cur]=[cur,prev]}
+  return prev[m]/(n+m)}
+/* skóre promluvy proti uloženým vzorům; dlouhá promluva = zkusí i začátek („Hej Loopnote, co je tohle?“) */
+function wkScore(feat,tpl){const per=[];for(const t of tpl.t){let best=1e9;const L=t.length;const lens=feat.length>L*1.5?[.8,.95,1.1,1.25].map(k=>Math.round(L*k)):[feat.length];
+    for(const l of lens){if(l<L*.55||l>L*1.7)continue;best=Math.min(best,wkDtw(feat.slice(0,l),t))}per.push(best)}
+  per.sort((a,b)=>a-b);return per.length>1?per[1]:per[0]} // musí sedět aspoň na 2 ze 3 nahrávek – méně omylů
+function wkTrain(samples){const t=samples.map(wkMfcc).filter(f=>f.length>=25);if(t.length<3)return {err:'short'};const ds=[];
+  for(let i=0;i<t.length;i++)for(let j=i+1;j<t.length;j++)ds.push(wkDtw(t[i],t[j]));const mx=Math.max(...ds),mean=ds.reduce((a,b)=>a+b,0)/ds.length;
+  if(mx>mean*1.9)return {err:'inconsistent'};return {t,thr:Math.min(Math.max(mx*1.45,mean*1.7),mean*2.1),mean}}
+/* hlídání promluv: energie po 10 ms, promluva = úsek řeči ukončený 0,3 s ticha */
+function wkSegmenter(onSeg){let noise=.004,buf=[],pre=[],inSp=false,sil=0,len=0,dbg=0,mx=0;
+  return x=>{if(typeof window!=='undefined'&&window.LN_WAKE_DEBUG){for(let i=0;i<x.length;i++)mx=Math.max(mx,Math.abs(x[i]));if(++dbg%40===0){console.info('[wake] peak',mx.toFixed(3),'noise',noise.toFixed(4),'n',x.length);mx=0}}for(let s=0;s+160<=x.length;s+=160){const fr=x.subarray(s,s+160);let e=0;for(let i=0;i<160;i++)e+=fr[i]*fr[i];e=Math.sqrt(e/160);
+    const thr=Math.max(.012,noise*3.2);
+    if(!inSp){pre.push(fr.slice());if(pre.length>15)pre.shift();if(e>thr){inSp=true;buf=pre.slice();pre=[];sil=0;len=0}else noise=noise*.98+e*.02}
+    else{buf.push(fr.slice());len++;if(e<thr*.7)sil++;else sil=0;
+      if(sil>=30||len>350){inSp=false;const n=buf.length-Math.min(sil,25);if(n>=35&&len<=350){const a=new Float32Array(n*160);for(let i=0;i<n;i++)a.set(buf[i],i*160);onSeg(a)}buf=[]}}}}}
+function wkResampler(from){const step=from/16000;let frac=0;return f=>{const n=Math.max(0,Math.ceil((f.length-frac)/step));const o=new Float32Array(Math.max(0,n));for(let i=0;i<n;i++)o[i]=f[Math.min(f.length-1,Math.floor(frac+i*step))];frac=frac+n*step-f.length;return o}}
+/* --- mikrofon --- */
+async function wkMic(onAudio){const st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+  const ctx=new (window.AudioContext||window.webkitAudioContext)();const src=ctx.createMediaStreamSource(st),proc=ctx.createScriptProcessor(2048,1,1),g=ctx.createGain();g.gain.value=0;
+  src.connect(proc);proc.connect(g);g.connect(ctx.destination);const rs=wkResampler(ctx.sampleRate);proc.onaudioprocess=e=>onAudio(rs(e.inputBuffer.getChannelData(0)));
+  return {stop(){try{proc.disconnect();src.disconnect()}catch(e){}st.getTracks().forEach(t=>t.stop());try{ctx.close()}catch(e){}}}}
+function wkLoad(){try{const o=JSON.parse(localStorage.getItem('ln-wake')||'null');return o&&o.t&&o.t.length?o:null}catch(e){return null}}
+function wkSave(o){try{localStorage.setItem('ln-wake',JSON.stringify({t:o.t.map(f=>f.map(r=>r.map(v=>Math.round(v*1000)/1000))),thr:o.thr,mean:o.mean}))}catch(e){}}
+function wkSens(){return {low:.85,mid:1,high:1.15}[S.prefs.wakeSens||'mid']||1}
+async function wkStart(){if(WK.mic||!window.loopnoteDesktop)return;WK.tpl=wkLoad();if(!WK.tpl)return;
+  try{const seg=wkSegmenter(a=>{if(WK.busy||Date.now()<WK.cool||(typeof TALK!=='undefined'&&TALK.on)||(typeof speaking!=='undefined'&&speaking))return;
+      const sc=wkScore(wkMfcc(a),WK.tpl);if(window.LN_WAKE_DEBUG)console.info('[wake] score',sc.toFixed(2),'thr',(WK.tpl.thr*wkSens()).toFixed(2));
+      if(sc<WK.tpl.thr*wkSens()){WK.cool=Date.now()+4000;wkFire()}});
+    WK.mic=await wkMic(x=>seg(x))}catch(e){WK.mic=null;console.warn('[wake] mic',e)}}
+function wkStop(){if(WK.mic){WK.mic.stop();WK.mic=null}}
+function wkSync(){if(S.prefs.wake&&wkLoad()&&window.loopnoteDesktop)wkStart();else wkStop()}
+function wkBeep(){try{const c=new AudioContext(),o=c.createOscillator(),g=c.createGain();o.frequency.value=880;o.frequency.setValueAtTime(880,c.currentTime);o.frequency.setValueAtTime(1320,c.currentTime+.09);
+  g.gain.setValueAtTime(.0001,c.currentTime);g.gain.exponentialRampToValueAtTime(.18,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+.22);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.25);setTimeout(()=>c.close(),400)}catch(e){}}
+function wkFire(){const D=window.loopnoteDesktop;wkBeep();if(D&&D.wake)D.wake();}
+/* --- naučení: 3× „Hej Loopnote“ --- */
+function wakeTrain(){const D=window.loopnoteDesktop;if(!D)return;wkStop();const got=[];let mic=null,done=false;
+  const m=openModal(`<div class="modal-h"><h2>${L('Nauč Loopnote svůj hlas','Teach Loopnote your voice')}</h2><button class="iconbtn" type="button" data-x aria-label="${L('Zavřít','Close')}"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="modal-b"><p style="margin:0 0 12px">${L('Řekni 3× normálním hlasem <b>„Hej Loopnote“</b> – vždy po zelené tečce, s krátkou pauzou. Vše zůstává v tomhle počítači.','Say <b>“Hey Loopnote”</b> 3 times in your normal voice – each time after the green dot, with a short pause. Everything stays on this computer.')}</p>
+    <div id="wkDots" style="display:flex;gap:10px;justify-content:center;margin:14px 0">${[0,1,2].map(i=>`<span style="width:18px;height:18px;border-radius:50%;background:var(--line,#ddd)" data-d="${i}"></span>`).join('')}</div>
+    <p id="wkMsg" class="fine" style="text-align:center;margin:0">${L('Připravuju mikrofon…','Preparing the microphone…')}</p></div>
+    <div class="modal-f"><button type="button" class="btn" data-x>${L('Zrušit','Cancel')}</button></div>`);
+  const msg=t=>{const e=$('#wkMsg',m);if(e)e.textContent=t};
+  const dots=()=>m.querySelectorAll('[data-d]').forEach((d,i)=>d.style.background=i<got.length?'#1f8f6e':i===got.length?'#2f9e44':'var(--line,#ddd)');
+  const close=()=>{done=true;if(mic)mic.stop();closeModal();wkSync()};
+  m.addEventListener('click',e=>{if(e.target.closest('[data-x]'))close()});
+  const seg=wkSegmenter(a=>{if(done)return;const dur=a.length/16000;if(dur<.45||dur>2.6){msg(L('To bylo moc krátké nebo dlouhé – zkus to znovu.','That was too short or long – try again.'));return}
+    got.push(a);dots();if(got.length<3){msg(L(`Dobře (${got.length}/3). Ještě jednou…`,`Good (${got.length}/3). Once more…`));return}
+    const t=wkTrain(got);if(t.err){got.length=0;dots();msg(L('Nahrávky se moc liší – řekni to 3× stejně, v klidu.','The recordings differ too much – say it the same way 3 times.'));return}
+    wkSave(t);S.prefs.wake=true;save();done=true;msg('✓ '+L('Hotovo! Teď stačí říct „Hej Loopnote“.','Done! Now just say “Hey Loopnote”.'));if(mic)mic.stop();
+    setTimeout(()=>{closeModal();wkSync();const g=document.getElementById('deskTalkG');if(g)g.outerHTML=deskTalkHTML()},1300)});
+  wkMic(x=>seg(x)).then(r=>{mic=r;if(done){r.stop();return}dots();msg(L('Teď řekni „Hej Loopnote“…','Now say “Hey Loopnote”…'))}).catch(()=>msg(L('Nemám přístup k mikrofonu.','No microphone access.')))}
+if(window.loopnoteDesktop)setTimeout(wkSync,3000);
 
 /* ===== Účet a synchronizace: přihlášení kódem z e-mailu, sešity na všech zařízeních, sdílení se spolužáky ===== */
 const SYNCUI={step:'email',email:'',busy:false,err:''};
@@ -3920,7 +4116,7 @@ if(window.loopnoteDesktop){document.documentElement.classList.add('is-desktop');
     catch(e){D.explainResult({id:req.id,err:errCopy(e&&e.code),lang:LOC(),ui:LANG()})}});
   D.onTalk&&D.onTalk(req=>{talkStop();if(!req.on){deskRecapSoon();return}
     if(req.mode==='screen'){const hist=deskHist(),sid=req.sid;D.drawClear(false);
-      talkLoop(async(q,part)=>{let lp=0,drawn=false;
+      const classic=()=>talkLoop(async(q,part)=>{let lp=0,drawn=false;
           const raw=await screenAnswer(q,hist,rw=>{
             // kresba hned, jak AI dopíše kreslicí řádek (je na začátku odpovědi) – kreslí se, zatímco mluví
             if(!drawn){const it=drawItems(rw);if(it.length){drawn=true;D.draw({items:it})}}
@@ -3929,7 +4125,8 @@ if(window.loopnoteDesktop){document.documentElement.classList.add('is-desktop');
           if(!/\[\[\s*KRESLI/i.test(raw))console.info('[Loopnote] AI tentokrát nic nekreslila');
           agHandle(raw,q,null);ukolStart(raw,SHOT_LAST);const text=cleanAns(raw,false);
           hist.push({role:'user',content:q},{role:'assistant',content:text});DESK_MEM.t=Date.now();D.talkEvent({sid,type:'answer',q,text});return text},
-        (st,x)=>{if(st==='level')return;if(st==='off')deskRecapSoon();if(st==='listening')D.drawClear(true);D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x})});return}const hist=(req.history||[]).slice();const sid=req.sid;
+        (st,x)=>{if(st==='level')return;if(st==='off')deskRecapSoon();if(st==='listening')D.drawClear(true);D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x})});
+      if(liveOn())deskLive(sid,hist,classic);else classic();return}const hist=(req.history||[]).slice();const sid=req.sid;
     talkLoop(async(q,part)=>{let lp=0;const r=await deskAnswer(req.url,q,hist,t=>{part&&part(t);const n=Date.now();if(n-lp>90){lp=n;D.talkEvent({sid,type:'partial',text:t})}});hist.push({role:'user',content:q},{role:'assistant',content:r.text});D.talkEvent({sid,type:'answer',q,text:r.text,acts:r.acts});return r.text},
       (st,x)=>{if(st!=='level')D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x});else D.talkEvent({sid,type:'level',x})})});
   D.onSpeak&&D.onSpeak(r=>{if(r&&r.text){unlockAudio();speak(r.text)}else stopSpeak()});

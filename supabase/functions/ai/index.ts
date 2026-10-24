@@ -30,6 +30,18 @@ const CLAUDE_MODEL = env("ANTHROPIC_MODEL", "claude-sonnet-5-5");
 const FREE_LIMIT = Number(env("FREE_LIMIT", "10"));
 const UI_LIMIT = 60; // překlady rozhraní: dávek denně na zařízení
 const VOICE_LIMIT = Number(env("VOICE_LIMIT", "400")); // hlas a přepis řeči
+// rozhovor „jako v telefonu“ (Gemini Live): appka dostane krátkodobý klíč na jedno spojení, hlavní klíč nikdy neopustí server
+const LIVE_MODEL = env("GEMINI_LIVE_MODEL") || "gemini-3.8-live";
+async function liveToken() {
+  const now = Date.now();
+  const r = await fetch("https://generativelanguage.googleapis.com/v1beta/auth_tokens", {
+    method: "POST", signal: AbortSignal.timeout(15000), headers: { "x-goog-api-key": GEMINI_KEY, "content-type": "application/json" },
+    body: JSON.stringify({ uses: 1, expireTime: new Date(now + 30 * 60e3).toISOString(), newSessionExpireTime: new Date(now + 2 * 60e3).toISOString() }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.name) throw new Error((r.status === 429 ? "busy: " : "") + `live token ${r.status}: ${(d.error && d.error.message) || ""}`.slice(0, 250));
+  return { token: d.name as string, model: LIVE_MODEL };
+}
 const TTS_MODELS = [env("GEMINI_TTS_MODEL"), "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"].filter(Boolean);
 const VOICES = new Set(["Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"]);
 let goodTts = ""; let ttsShape = 0;
@@ -259,9 +271,15 @@ async function handle(req: Request): Promise<Response> {
         if (r.ok) { ok = model; goodModel = model; break; }
       } catch (_e) { tried.push({ model, status: "timeout", ms: Date.now() - t }); }
     }
-    let voice = "";
+    let voice = "", live = "";
     if (ok) { try { await tts("Ok.", "Kore"); voice = "ok"; } catch (e) { voice = String((e as Error).message || e).slice(0, 200); } }
-    return json({ ok: !!ok, model: ok, voice, tried });
+    try { await liveToken(); live = "ok (" + LIVE_MODEL + ")"; } catch (e) { live = String((e as Error).message || e).slice(0, 200); }
+    return json({ ok: !!ok, model: ok, voice, live, tried });
+  }
+  if (body.purpose === "live") {
+    if (!GEMINI_KEY) return json({ code: "unavailable", detail: errDetail("no_gemini") }, 502);
+    try { return json(await liveToken()); }
+    catch (e) { const m = String((e as Error).message || e); console.error(m); return json({ code: errCode(m), detail: errDetail(m) }, m.startsWith("busy") ? 429 : 502); }
   }
   if (isTts) {
     const text = messages[0].content.trim().slice(0, 1500);

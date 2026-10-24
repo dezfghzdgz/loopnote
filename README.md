@@ -124,6 +124,8 @@ Appky sestaví GitHub sám – nic neinstaluješ.
 ## Počítač: kamarád u kurzoru a úkoly na pozadí
 - Malý Loopnote jezdí vedle myši (nastavení: pořád / jen při mluvení / vypnuto, i v menu u hodin). Při mluvení (Ctrl+Shift+Mezerník) poslouchá, přemýšlí a mluví – a když se ptáš „kde je…/kam kliknout“, doletí na místo a ukáže ho s popiskem. Funguje i na více monitorech (bere obrazovku, kde je myš).
 - Po rozhovoru se samo uloží shrnutí do sešitu (nebo do „Deník učení“) a důležité věci přijdou jako kartičky k opakování (dá se vypnout v Nastavení). Když se do 15 minut vrátíš, pomocník ví, o čem jste mluvili.
+- **Rozhovor jako v telefonu (Gemini Live):** odpověď začne skoro hned a pomocníkovi jde skočit do řeči. Server vydá appce krátkodobý klíč na jedno spojení (hlavní klíč nikdy neopustí Supabase). Model jde změnit secretem `GEMINI_LIVE_MODEL` (výchozí `gemini-3.8-live`). Když Live nejde, appka sama přepne na běžný režim. Vypíná se v Nastavení.
+- **„Hej Loopnote“:** v Nastavení → Naučit můj hlas (3× to řekneš). Rozpoznává se jen v počítači (žádný internet, dokud ho nezavoláš), pak pípne a poslouchá.
 - Běžící minutku ukazuje kamarád jako ubývající žlutý kroužek s časem.
 - Delší věci („udělej mi podobné příklady“, „připrav test“, „udělej z toho zápis“) pomocník dělá na pozadí: hned řekne, že na tom pracuje, ty můžeš dělat cokoli dalšího a po dokončení přijde oznámení a výsledek je v sešitu.
 

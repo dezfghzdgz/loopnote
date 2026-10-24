@@ -29,7 +29,7 @@
   const COL = { red: "#e03131", green: "#2f9e44", blue: "#1c7ed6", yellow: "#f59f00" };
   let items = [], start = 0, raf = 0, fade = 1, fadeT = 0, subsOn = true;
   const T = { listening: { en: "Listening…", cs: "Poslouchám…" }, thinking: { en: "Thinking…", cs: "Přemýšlím…" } };
-  const ui = new URLSearchParams(location.search).get("ui") || "en";
+  let ui = new URLSearchParams(location.search).get("ui") || "en";
   function size() { cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio; draw(); }
   addEventListener("resize", size);
   // ručně vypadající čára: pár bodů s drobnými odchylkami
@@ -179,6 +179,7 @@
     if (!on && BUD.raf) { cancelAnimationFrame(BUD.raf); BUD.raf = 0; BUD.queue = []; BUD.fly = null; }
   }
   api.onAnnot((m) => {
+    if (m.ui) ui = m.ui;
     if (m.buddy != null) budOn(!!m.buddy);
     if (m.cur) { BUD.cx = m.cur[0]; BUD.cy = m.cur[1]; if (!BUD.seen) { BUD.seen = true; BUD.x = BUD.cx + 22; BUD.y = BUD.cy + 24; } }
     if (m.jobs != null) BUD.jobs = m.jobs;

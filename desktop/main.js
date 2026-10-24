@@ -311,9 +311,11 @@ ipcMain.on("talk-event", (_e, ev) => {
       if (ev.st === "off" || ev.st === "error") { screenTalk.on = false; try { globalShortcut.unregister("Escape"); } catch (e) { /* nic */ } toAnnot({ st: ev.st === "error" ? "listening" : "off", text: ev.x || "", clear: "slow" }); if (ev.st === "error") setTimeout(() => { toAnnot({ st: "off" }); hideAnnotSoon(); }, 5000); else hideAnnotSoon(); setTimeout(buddySync, 4000); }
       else if (ev.st === "listening") toAnnot({ st: "listening" });
       else if (ev.st === "heard") toAnnot({ st: "heard", text: "„" + (ev.x || "") + "“" });
-      else if (ev.st === "thinking") toAnnot({ st: "thinking" });
+      else if (ev.st === "thinking") toAnnot({ st: "thinking", text: ev.x || "" });
+      else if (ev.st === "speaking") toAnnot({ st: "speaking" });
+      screenTalk.st = ev.st;
     }
-    if (ev.type === "partial" && ev.text) toAnnot({ st: "thinking", text: ev.text.replace(/\s+/g, " ").slice(-220) });
+    if (ev.type === "partial" && ev.text) toAnnot({ st: screenTalk.st === "speaking" ? "speaking" : "thinking", text: ev.text.replace(/\s+/g, " ").slice(-220) });
     if (ev.type === "answer") toAnnot({ st: "speaking", text: (ev.text || "").replace(/\*\*/g, "").replace(/\s+/g, " ").slice(0, 320) });
   }
   if (ev && ev.type === "state") bubbleState(["listening", "thinking", "heard", "speaking"].includes(ev.st) ? ev.st : "");
@@ -350,9 +352,15 @@ ipcMain.on("explain-result", (_e, res) => {
   pending.delete(res.id);
   if (s && !s.isDestroyed()) s.send("panel-answer", res);
 });
-ipcMain.on("hello", (_e, l) => { if (!l || !l.ui) return; const m0 = lang.mode; const b0 = lang.buddy; lang = { ui: l.ui, loc: l.loc || lang.loc, mode: l.mode || lang.mode, subs: l.subs !== false, buddy: l.buddy || lang.buddy }; if (m0 !== lang.mode || b0 !== lang.buddy) updateTray(); buddySync(); });
+ipcMain.on("hello", (_e, l) => { if (!l || !l.ui) return; const m0 = lang.mode; const b0 = lang.buddy, u0 = lang.ui; lang = { ui: l.ui, loc: l.loc || lang.loc, mode: l.mode || lang.mode, subs: l.subs !== false, buddy: l.buddy || lang.buddy }; if (m0 !== lang.mode || b0 !== lang.buddy) updateTray(); if (u0 !== lang.ui && annot && !annot.isDestroyed()) annot.webContents.send("annot", { ui: lang.ui }); buddySync(); });
 // úkoly na pozadí: počet běžících (kamarád ukáže točící se tečku) a oznámení, když je hotovo
 ipcMain.on("jobs", (_e, n) => { jobsN = +n || 0; if (annot && !annot.isDestroyed()) annot.webContents.send("annot", { jobs: jobsN }); if (tray) tray.setToolTip(jobsN ? `Loopnote – ${jobsN} ⏳` : "Loopnote"); });
+// „Hej Loopnote“ (rozpoznává se v appce, v počítači) → začít mluvit
+ipcMain.on("wake", () => {
+  if (screenTalk.on || (panel && !panel.isDestroyed())) return;
+  if (curT) toAnnot({ say: lang.ui === "cs" ? "Ano? Poslouchám 🙂" : "Yes? I'm listening 🙂" });
+  startTalk();
+});
 let timerNow = null;
 ipcMain.on("timers", (_e, t) => { timerNow = t || null; if (annot && !annot.isDestroyed()) annot.webContents.send("annot", { timer: timerNow }); });
 ipcMain.on("notify", (_e, d) => {
