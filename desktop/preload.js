@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("loopnoteDesktop", {
   drawTest: (d) => ipcRenderer.send("draw-test", d),
   onAnnot: (cb) => on("annot", cb),
   jobs: (n) => ipcRenderer.send("jobs", n),
+  timers: (t) => ipcRenderer.send("timers", t),
   notify: (d) => ipcRenderer.send("notify", d),
   capture: () => ipcRenderer.send("bubble-click"),
   // bublina

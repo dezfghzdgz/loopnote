@@ -194,7 +194,12 @@ async function claude(messages: Msg[], images: Img[], wantJson: boolean, maxToke
   return (d.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
 }
 
+// každá chyba serveru se vrátí jako odpověď s CORS hlavičkami – jinak by ji prohlížeč ukázal jako „jsi offline“
 Deno.serve(async (req) => {
+  try { return await handle(req); }
+  catch (e) { const m = String((e as Error)?.message || e); console.error("handler crash", m); return json({ code: "unavailable", detail: "server error: " + m.slice(0, 200) }, 500); }
+});
+async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ code: "bad_request" }, 405);
 
@@ -317,4 +322,4 @@ Deno.serve(async (req) => {
     }
   }
   return json({ code: errCode(lastErr), detail: errDetail(lastErr) }, lastErr.startsWith("busy") ? 429 : 502);
-});
+}

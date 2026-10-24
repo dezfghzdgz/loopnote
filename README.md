@@ -123,6 +123,8 @@ Appky sestaví GitHub sám – nic neinstaluješ.
 
 ## Počítač: kamarád u kurzoru a úkoly na pozadí
 - Malý Loopnote jezdí vedle myši (nastavení: pořád / jen při mluvení / vypnuto, i v menu u hodin). Při mluvení (Ctrl+Shift+Mezerník) poslouchá, přemýšlí a mluví – a když se ptáš „kde je…/kam kliknout“, doletí na místo a ukáže ho s popiskem. Funguje i na více monitorech (bere obrazovku, kde je myš).
+- Po rozhovoru se samo uloží shrnutí do sešitu (nebo do „Deník učení“) a důležité věci přijdou jako kartičky k opakování (dá se vypnout v Nastavení). Když se do 15 minut vrátíš, pomocník ví, o čem jste mluvili.
+- Běžící minutku ukazuje kamarád jako ubývající žlutý kroužek s časem.
 - Delší věci („udělej mi podobné příklady“, „připrav test“, „udělej z toho zápis“) pomocník dělá na pozadí: hned řekne, že na tom pracuje, ty můžeš dělat cokoli dalšího a po dokončení přijde oznámení a výsledek je v sešitu.
 
 ## Android: bublina přes ostatní aplikace

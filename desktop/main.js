@@ -238,7 +238,7 @@ function buddyWanted() { return !bubbleOff && (lang.buddy === "always" || (lang.
 function buddySync() {
   const want = buddyWanted();
   if (want && !curT) {
-    toAnnot({ buddy: true, jobs: jobsN });
+    toAnnot({ buddy: true, jobs: jobsN, timer: timerNow });
     curT = setInterval(feedCursor, 16);
   } else if (!want && curT) {
     clearInterval(curT); curT = null; lastCur = "";
@@ -353,6 +353,8 @@ ipcMain.on("explain-result", (_e, res) => {
 ipcMain.on("hello", (_e, l) => { if (!l || !l.ui) return; const m0 = lang.mode; const b0 = lang.buddy; lang = { ui: l.ui, loc: l.loc || lang.loc, mode: l.mode || lang.mode, subs: l.subs !== false, buddy: l.buddy || lang.buddy }; if (m0 !== lang.mode || b0 !== lang.buddy) updateTray(); buddySync(); });
 // úkoly na pozadí: počet běžících (kamarád ukáže točící se tečku) a oznámení, když je hotovo
 ipcMain.on("jobs", (_e, n) => { jobsN = +n || 0; if (annot && !annot.isDestroyed()) annot.webContents.send("annot", { jobs: jobsN }); if (tray) tray.setToolTip(jobsN ? `Loopnote – ${jobsN} ⏳` : "Loopnote"); });
+let timerNow = null;
+ipcMain.on("timers", (_e, t) => { timerNow = t || null; if (annot && !annot.isDestroyed()) annot.webContents.send("annot", { timer: timerNow }); });
 ipcMain.on("notify", (_e, d) => {
   if (!d) return;
   if (curT && d.say) toAnnot({ say: String(d.say).slice(0, 120) });

@@ -780,8 +780,10 @@ function apiSample(){let dev='x';try{dev=localStorage.getItem('krouzek-dev');if(
     AI_DETAIL='';const imgs=opts.images?(await Promise.all(opts.images)).filter(Boolean):[];const images=await Promise.all(imgs.map(b64));const tok=await accToken();let r;
     const ctl=new AbortController();let tmo=false;let wd=setTimeout(()=>{tmo=true;ctl.abort()},!json&&opts.onText?45000:120000);const kick=()=>{clearTimeout(wd);wd=setTimeout(()=>{tmo=true;ctl.abort()},40000)};
     if(opts.signal){if(opts.signal.aborted)ctl.abort();else opts.signal.addEventListener('abort',()=>ctl.abort(),{once:true})}
-    try{r=await fetch(KCFG.supabaseUrl+'/functions/v1/ai',{method:'POST',signal:ctl.signal,headers:{'content-type':'application/json',apikey:KCFG.anonKey,authorization:'Bearer '+(tok||KCFG.anonKey),'x-device':dev},
-      body:JSON.stringify({messages,images,tier:opts.modelTier||'default',json,purpose:opts.purpose||'',lang:LANG(),stream:!json&&!!opts.onText})})}
+    const go=()=>fetch(KCFG.supabaseUrl+'/functions/v1/ai',{method:'POST',signal:ctl.signal,headers:{'content-type':'application/json',apikey:KCFG.anonKey,authorization:'Bearer '+(tok||KCFG.anonKey),'x-device':dev},
+      body:JSON.stringify({messages,images,tier:opts.modelTier||'default',json,purpose:opts.purpose||'',lang:LANG(),stream:!json&&!!opts.onText})});
+    // jeden tichý pokus navíc, když spojení na chvíli vypadne
+    try{try{r=await go()}catch(e1){if(tmo||ctl.signal.aborted)throw e1;await new Promise(z=>setTimeout(z,900));r=await go()}}
     catch(e){clearTimeout(wd);throw {code:tmo?'timeout':e&&e.name==='AbortError'?'cancelled':'offline'}}
     // průběžná odpověď: text se ukazuje, jak vzniká
     if(r.ok&&/event-stream/.test(r.headers.get('content-type')||'')){const rd=r.body.getReader(),dec=new TextDecoder();let buf='',text='';
@@ -3561,10 +3563,11 @@ function deskTalkHTML(){if(!window.loopnoteDesktop)return '';const m=S.prefs.des
     <div class="opts c3"><button type="button" class="opt" data-dbuddy="always" aria-pressed="${bd==='always'}"><b>${L('Pořád','Always')}</b><small>${L('Malý Loopnote jezdí s myší, při mluvení ukazuje, kam kliknout.','A tiny Loopnote rides along with your mouse and points where to click.')}</small></button>
     <button type="button" class="opt" data-dbuddy="talk" aria-pressed="${bd==='talk'}"><b>${L('Jen při mluvení','Only while talking')}</b><small>${L('Objeví se, když s ním mluvíš.','Shows up when you talk to it.')}</small></button>
     <button type="button" class="opt" data-dbuddy="off" aria-pressed="${bd==='off'}"><b>${L('Vypnuto','Off')}</b><small>${L('Ukazuje jen šipkami a kroužky.','Points with arrows and circles only.')}</small></button></div>
+    <button type="button" class="toggle" data-drecap aria-pressed="${S.prefs.recap!==false}"><span><b>${L('Po rozhovoru uložit shrnutí a kartičky','Save a recap and review cards after talking')}</b><small>${L('Co jste probrali, se zapíše do sešitu a důležité věci přijdou k opakování.','What you covered goes into a notebook and the key points into your reviews.')}</small></span><span class="knob"></span></button>
     <div class="row"><button type="button" class="btn" data-dtest>✏️ ${L('Vyzkoušet kreslení na obrazovku','Test drawing on screen')}</button><button type="button" class="toggle" data-dack aria-pressed="${S.prefs.ack!==false}" style="flex:1"><span><b>${L('Hned potvrdit („jasně, podívám se“)','Acknowledge right away (“sure, let me look”)')}</b></span><span class="knob"></span></button></div>
     <p class="fine" style="margin:0">${L('Mluvit začneš podržením bubliny, pravým klikem nebo Ctrl+Shift+Mezerník. Ukončíš klikem na bublinu nebo Esc.','Start talking by holding the bubble, right-clicking it or Ctrl+Shift+Space. Stop with a click on the bubble or Esc.')} ${L('Když chceš něco delšího (podobné příklady, test, zápis), řekni to – připraví to na pozadí a dá vědět.','Ask for something longer (similar exercises, a test, notes) and it gets made in the background – you’ll be told when it’s ready.')}</p></div>`}
 document.addEventListener('click',e=>{if(e.target.closest('[data-dtest]')&&window.loopnoteDesktop){window.loopnoteDesktop.drawTest({text:L('Takhle ti budu ukazovat přímo na obrazovce.','This is how I will point things out on your screen.'),items:[{type:'point',box:[200,140,240,260],text:L('tady to je','right here')},{type:'circle',box:[380,330,560,560],color:'red'},{type:'arrow',box:[380,330,560,560],color:'blue'},{type:'underline',box:[620,300,660,700],color:'green'},{type:'check',box:[620,700,660,720],color:'green'},{type:'text',box:[300,600,330,700],text:L('tady!','here!'),color:'red'}]});return}
-  const b=e.target.closest('[data-dtalk],[data-dsubs],[data-dack],[data-dbuddy]');if(!b)return;if(b.dataset.dbuddy)S.prefs.buddy=b.dataset.dbuddy;else if(b.dataset.dtalk)S.prefs.deskTalk=b.dataset.dtalk;else if('dack' in b.dataset){S.prefs.ack=S.prefs.ack===false;VX.ackKey=null}else S.prefs.deskSubs=!(S.prefs.deskSubs!==false);save();
+  const b=e.target.closest('[data-dtalk],[data-dsubs],[data-dack],[data-dbuddy],[data-drecap]');if(!b)return;if('drecap' in b.dataset)S.prefs.recap=S.prefs.recap===false;else if(b.dataset.dbuddy)S.prefs.buddy=b.dataset.dbuddy;else if(b.dataset.dtalk)S.prefs.deskTalk=b.dataset.dtalk;else if('dack' in b.dataset){S.prefs.ack=S.prefs.ack===false;VX.ackKey=null}else S.prefs.deskSubs=!(S.prefs.deskSubs!==false);save();
   window.__deskHello&&window.__deskHello();const g=document.getElementById('deskTalkG');if(g)g.outerHTML=deskTalkHTML()},true);
 function VX_ONB(){const cur=vxVoice();return `<h1>${L('Hlas pomocníka','Your helper\'s voice')}</h1><p class="lead">${L('Vyber si, jak na tebe bude pomocník mluvit. Ťukni na hlas a hned ho uslyšíš.','Pick how your helper sounds. Tap a voice to hear it.')}</p>
   <div class="opts">${CLOUD_VOICES.slice(0,6).map(([k,d])=>`<button type="button" class="opt" data-cvoice="${k}" aria-pressed="${cur===k}"><b>${k}</b><small>${esc(d)}</small></button>`).join('')}</div>
@@ -3648,6 +3651,39 @@ function jobsRender(){let el=document.getElementById('jobsBar');const recent=JOB
 #jobsBar .job{display:flex;align-items:center;gap:10px}#jobsBar .job .tx{flex:1;min-width:0;display:flex;flex-direction:column;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#jobsBar .job small{opacity:.65}
 #jobsBar .ic{width:22px;height:22px;display:grid;place-items:center;border-radius:50%;background:rgba(31,143,110,.12);color:#1f8f6e;flex:none;font-weight:700}#jobsBar .err .ic{background:rgba(224,49,49,.12);color:#e03131}
 #jobsBar .spin{width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:vxspin .7s linear infinite}`;document.head.appendChild(st)}catch(e){}})();
+
+/* ===== Po rozhovoru: shrnutí do sešitu + kartičky na opakování (pomocník si pamatuje, co ses učil) ===== */
+const DESK_MEM={hist:[],t:0,done:0,shot:null};
+function deskHist(){if(Date.now()-DESK_MEM.t>15*60e3){DESK_MEM.hist=[];DESK_MEM.done=0}DESK_MEM.t=Date.now();return DESK_MEM.hist}
+function deskRecapSoon(){clearTimeout(deskRecapSoon.t);deskRecapSoon.t=setTimeout(deskRecap,1500)}
+async function deskRecap(){if(S.prefs.recap===false)return;const h=DESK_MEM.hist.slice(DESK_MEM.done);const users=h.filter(x=>x.role==='user');
+  if(users.length<2||h.map(x=>x.content).join(' ').length<300)return;DESK_MEM.done=DESK_MEM.hist.length;
+  const job={id:++JOBS.seq,task:'recap',title:L('Shrnutí rozhovoru','Conversation recap'),st:'run',t0:Date.now()};JOBS.list.push(job);jobsSync();jobsRender();
+  try{const sample=await SAMPLE_P;if(!sample)throw {code:'offline'};
+    const names=S.notebooks.filter(n=>!n.deleted).map(n=>n.title).slice(0,30).join(', ');
+    const r=await sample.json(`${TEACHER()}
+${profileCtx(null)}
+Níže je rozhovor studenta s tebou (učil se u počítače). Udělej z něj podklady k opakování. ${typeof GEN_RULE!=='undefined'?GEN_RULE:''} ${typeof MATH_RULE!=='undefined'?MATH_RULE:''}
+Jazyk: kód ${LANG()}. Jen to, co se opravdu probíralo a co si má zapamatovat – žádné „ahoj“, žádné povídání.
+Odpověz jen JSON: {"title":"krátký nadpis (téma)","notebook":"který z jeho sešitů se hodí (${names}) nebo null","notes":"stručný zápis v Markdownu: nadpisy ##, odrážky, vzorce v $…$, max ~150 slov","cards":[{"q":"otázka, co nutí přemýšlet","a":"krátká odpověď","topic":"2–3 slova"}]}
+Kartiček 0–5 (žádné, když nebylo co učit).
+
+ROZHOVOR:
+${h.map(x=>(x.role==='user'?'STUDENT: ':'POMOCNÍK: ')+String(x.content).slice(0,1500)).join('\n')}`,{modelTier:S.profile.ai==='quick'?'default':(S.profile.ai||'default')});spendUsage();
+    if(!r||!r.notes)throw {code:'invalid_json'};
+    let nb=r.notebook?nbByName(r.notebook):null;
+    if(!nb){const t=L('Deník učení','Learning log');nb=S.notebooks.find(n=>n.title===t&&!n.deleted);if(!nb){nb=newNbNamed(t);nb.cover={color:'#1f8f6e',pattern:'linen'}}}
+    const title=String(r.title||job.title).slice(0,80);const pi=appendNote(nb,mdToNote(r.notes,title));nb.edited=true;touch(nb);
+    const ni=S.notebooks.indexOf(nb);const cs=(Array.isArray(r.cards)?r.cards:[]).filter(c=>c&&c.q&&c.a).slice(0,5);
+    cs.forEach(c=>addCard({nbId:nb.id,q:String(c.q),a:String(c.a),topic:String(c.topic||title).slice(0,40),src:`[s:${ni+1}:${pi+1}]`}));save();
+    if(typeof ED!=='undefined'&&ED&&ED.nb===nb)refreshEdPages();else if(!$('#lib').hidden)renderLib();
+    job.st='done';job.title=title;job.nbId=nb.id;job.pi=pi;job.nbTitle=nb.title;jobsSync();jobsRender();
+    const msg=cs.length?L(`Shrnutí „${title}“ je v sešitu ${nb.title} a přidal jsem ${cs.length} kartičky na opakování.`,`Recap “${title}” is in ${nb.title}, plus ${cs.length} review cards.`):L(`Shrnutí „${title}“ je v sešitu ${nb.title}.`,`Recap “${title}” is in ${nb.title}.`);
+    const D=window.loopnoteDesktop;if(D&&D.notify)D.notify({title:'Loopnote ✓',body:msg,nbId:nb.id,pi,say:L('Uložil jsem shrnutí ✓','Recap saved ✓')});else toast(msg,4500)}
+  catch(e){job.st='err';job.err=errCopy(e&&e.code);jobsSync();jobsRender()}}
+/* minutky → kamarád ukazuje kolem sebe, kolik zbývá (soustředění / pauza) */
+(function deskTimers(){const D=window.loopnoteDesktop;if(!D||!D.timers)return;let last='';
+  setInterval(()=>{try{const t=TMRAW().filter(x=>!x.del&&x.end>Date.now()).sort((a,b)=>a.end-b.end)[0];const v=t?JSON.stringify({end:t.end,total:t.mins*60e3,label:t.label}):'';if(v!==last){last=v;D.timers(t?{end:t.end,total:t.mins*60e3,label:t.label}:null)}}catch(e){}},2000)})();
 
 /* ===== Účet a synchronizace: přihlášení kódem z e-mailu, sešity na všech zařízeních, sdílení se spolužáky ===== */
 const SYNCUI={step:'email',email:'',busy:false,err:''};
@@ -3846,7 +3882,8 @@ JAK MLUVIT: ${styleGuide()}
 Student s tebou mluví hlasem přes Loopnote na počítači. ${sh?'Na obrázku je, co má právě teď na obrazovce (web, video, PDF, úloha…).':''} Odpovídej krátce a přirozeně, jako když sedíš vedle něj: nejvýš 4–5 vět, bez nadpisů a seznamů. ${VOICE_RULE}
 UKAZOVÁNÍ NA OBRAZOVCE: ${sh?`Umíš studentovi kreslit přímo na obrazovku a máš to dělat: kdykoli mluvíš o něčem, co je vidět na obrázku (vzorec, slovo, krok, chyba, tlačítko, část grafu…), ukaž to. Napiš to jako ÚPLNĚ PRVNÍ řádek odpovědi (ještě před tím, co řekneš), přesně ve tvaru
 [[KRESLI {"items":[{"type":"circle","box":[ymin,xmin,ymax,xmax],"color":"red"}]}]]
-type: point (Loopnote kamarád u kurzoru tam doletí a ukáže – nejlepší, když jde o to, KDE něco je: tlačítko, menu, políčko, kam kliknout, která část; pole "text" = krátký popisek max 24 znaků, např. „klikni sem“), circle (zakroužkovat), underline (podtrhnout), arrow (šipka k místu), box (orámovat), check (fajfka – správně), cross (křížek – chyba), text (krátká poznámka rukou vedle místa, pole "text", max 30 znaků). box = přesné místo na obrázku v souřadnicích 0–1000 (ymin, xmin, ymax, xmax) – stejně jako když hledáš objekty na obrázku. color: red, green, blue nebo yellow. 1–4 položky. Pak teprve mluv a na nakreslené přirozeně odkaž („tady, co jsem zakroužkoval…“). Když se ptá, kde něco najde nebo kam kliknout, použij point (může jich být víc za sebou jako postup). Když na obrazovce opravdu není co ukázat (obecná otázka), řádek vynech.`:'Teď obrazovku nevidíš, nic nekresli.'}
+type: point (Loopnote kamarád u kurzoru tam doletí a ukáže – nejlepší, když jde o to, KDE něco je: tlačítko, menu, políčko, kam kliknout, která část; pole "text" = krátký popisek max 24 znaků, např. „klikni sem“), circle (zakroužkovat), underline (podtrhnout), arrow (šipka k místu), box (orámovat), check (fajfka – správně), cross (křížek – chyba), text (krátká poznámka rukou vedle místa, pole "text", max 30 znaků). box = přesné místo na obrázku v souřadnicích 0–1000 (ymin, xmin, ymax, xmax) – stejně jako když hledáš objekty na obrázku. color: red, green, blue nebo yellow. 1–4 položky. Pak teprve mluv a na nakreslené přirozeně odkaž („tady, co jsem zakroužkoval…“). ZKOUŠENÍ A UČENÍ: Když chce vyzkoušet nebo procvičit hned teď, ptej se po JEDNÉ otázce, počkej na jeho odpověď, řekni, jestli je dobře a proč, a pak dej další (ukaž na obrazovce, k čemu se otázka váže). Když řeší úlohu, kterou má umět sám, neprozrazuj hned celý výsledek – naveď ho dalším krokem a ukaž přesné místo, kde udělal chybu (cross/circle). Když něco nechápe, zkus to vysvětlit jinak a jednodušeji, klidně přirovnáním.
+Když se ptá, kde něco najde nebo kam kliknout, použij point (může jich být víc za sebou jako postup). Když na obrazovce opravdu není co ukázat (obecná otázka), řádek vynech.`:'Teď obrazovku nevidíš, nic nekresli.'}
 ${AG_RULE(false)}
 ${UKOL_RULE()}`;
   const input=history&&history.length?[{role:'user',content:sys},...history.slice(-8),{role:'user',content:q}]:sys+'\n\nSTUDENT ŘÍKÁ: '+q;
@@ -3881,8 +3918,8 @@ if(window.loopnoteDesktop){document.documentElement.classList.add('is-desktop');
   // přečtení nahlas řídí okénko (když ho mezitím zavřeš, nic nemluví)
   D.onExplain(async req=>{try{let last=0;const r=await deskAnswer(req.url,req.q,req.history,D.explainPartial?t=>{const n=Date.now();if(n-last>90){last=n;D.explainPartial({id:req.id,text:t})}}:undefined);D.explainResult({id:req.id,text:r.text,acts:r.acts,lang:LOC(),ui:LANG(),autoRead:!req.q&&!!S.prefs.autoRead})}
     catch(e){D.explainResult({id:req.id,err:errCopy(e&&e.code),lang:LOC(),ui:LANG()})}});
-  D.onTalk&&D.onTalk(req=>{talkStop();if(!req.on)return;
-    if(req.mode==='screen'){const hist=[],sid=req.sid;D.drawClear(false);
+  D.onTalk&&D.onTalk(req=>{talkStop();if(!req.on){deskRecapSoon();return}
+    if(req.mode==='screen'){const hist=deskHist(),sid=req.sid;D.drawClear(false);
       talkLoop(async(q,part)=>{let lp=0,drawn=false;
           const raw=await screenAnswer(q,hist,rw=>{
             // kresba hned, jak AI dopíše kreslicí řádek (je na začátku odpovědi) – kreslí se, zatímco mluví
@@ -3891,14 +3928,14 @@ if(window.loopnoteDesktop){document.documentElement.classList.add('is-desktop');
           if(!drawn){const it=drawItems(raw);if(it.length)D.draw({items:it})}
           if(!/\[\[\s*KRESLI/i.test(raw))console.info('[Loopnote] AI tentokrát nic nekreslila');
           agHandle(raw,q,null);ukolStart(raw,SHOT_LAST);const text=cleanAns(raw,false);
-          hist.push({role:'user',content:q},{role:'assistant',content:text});D.talkEvent({sid,type:'answer',q,text});return text},
-        (st,x)=>{if(st==='level')return;if(st==='listening')D.drawClear(true);D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x})});return}const hist=(req.history||[]).slice();const sid=req.sid;
+          hist.push({role:'user',content:q},{role:'assistant',content:text});DESK_MEM.t=Date.now();D.talkEvent({sid,type:'answer',q,text});return text},
+        (st,x)=>{if(st==='level')return;if(st==='off')deskRecapSoon();if(st==='listening')D.drawClear(true);D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x})});return}const hist=(req.history||[]).slice();const sid=req.sid;
     talkLoop(async(q,part)=>{let lp=0;const r=await deskAnswer(req.url,q,hist,t=>{part&&part(t);const n=Date.now();if(n-lp>90){lp=n;D.talkEvent({sid,type:'partial',text:t})}});hist.push({role:'user',content:q},{role:'assistant',content:r.text});D.talkEvent({sid,type:'answer',q,text:r.text,acts:r.acts});return r.text},
       (st,x)=>{if(st!=='level')D.talkEvent({sid,type:'state',st,x:st==='speaking'?'':x});else D.talkEvent({sid,type:'level',x})})});
   D.onSpeak&&D.onSpeak(r=>{if(r&&r.text){unlockAudio();speak(r.text)}else stopSpeak()});
   D.onOpenNb&&D.onOpenNb(r=>{const nb=S.notebooks.find(n=>n.id===r.nbId);if(!nb)return;if($('#modalRoot').children.length)closeModal();if(!S.profile.onboarded){S.profile.onboarded=true;save()}openNotebook(nb.id,r.pi||0)});
   D.onCaptureFailed(()=>toast(L('Nejde vyfotit obrazovku. Na Macu povol Loopnote v Nastavení → Soukromí → Nahrávání obrazovky.','Could not capture the screen. On a Mac allow Loopnote in Settings → Privacy → Screen Recording.'),6000))}
-function errCopy(code){const m=errCopy0(code),d=AI_DETAIL;AI_DETAIL='';return d&&!['cancelled','usage','refused','offline','busy'].includes(code)?m+' ('+String(d).slice(0,160)+')':m}
+function errCopy(code){let m=errCopy0(code);const d=AI_DETAIL;if(code==='offline'&&navigator.onLine!==false)m=L('Nepovedlo se spojit se serverem AI (internet máš). Zkus to za chvilku znovu – když to nepůjde, Nastavení → Spojení s AI → Otestovat.','Couldn’t reach the AI server (your internet works). Try again in a moment – if it keeps failing: Settings → AI connection → Test.');AI_DETAIL='';return d&&!['cancelled','usage','refused','offline','busy'].includes(code)?m+' ('+String(d).slice(0,160)+')':m}
 /* nová instalace: 3 sešity (1 s ukázkou, 2 prázdné), názvy podle jazyka, žádná vymyšlená zkouška ani kartičky */
 function SEED3_(){return {math:{en:'Mathematics',cs:'Matematika',sk:'Matematika',pl:'Matematyka',de:'Mathematik',fr:'Mathématiques',es:'Matemáticas',it:'Matematica',pt:'Matemática',uk:'Математика',hu:'Matematika',nl:'Wiskunde'},
   notes:{en:'Notes',cs:'Poznámky',sk:'Poznámky',pl:'Notatki',de:'Notizen',fr:'Notes',es:'Apuntes',it:'Appunti',pt:'Apontamentos',uk:'Нотатки',hu:'Jegyzetek',nl:'Aantekeningen'},

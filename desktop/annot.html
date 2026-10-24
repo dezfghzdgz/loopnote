@@ -152,6 +152,14 @@
     c.fillStyle = "#fff"; c.strokeStyle = ring; c.lineWidth = 4; c.beginPath(); c.arc(x, y, R, 0, 7); c.fill(); c.stroke();
     const da = st === "thinking" ? now / 260 : -0.75; // při přemýšlení tečka obíhá
     c.fillStyle = "#f5b800"; c.beginPath(); c.arc(x + Math.cos(da) * R, y + Math.sin(da) * R, 3.6, 0, 7); c.fill();
+    // minutka: kolem kamaráda ubývá žlutý oblouk (kolik zbývá do pauzy / konce)
+    if (BUD.timer && BUD.timer.end > Date.now()) {
+      const left = BUD.timer.end - Date.now(), fr = Math.max(0, Math.min(1, left / (BUD.timer.total || 1)));
+      c.strokeStyle = "rgba(245,184,0,.9)"; c.lineWidth = 3; c.lineCap = "round"; c.beginPath(); c.arc(x, y, R + 6, -Math.PI / 2, -Math.PI / 2 + fr * Math.PI * 2); c.stroke();
+      const mm = Math.floor(left / 60000), ss = Math.floor(left / 1000) % 60;
+      c.font = '700 10px "Segoe UI",system-ui,sans-serif'; c.fillStyle = "rgba(18,24,22,.85)"; const tt = mm + ":" + String(ss).padStart(2, "0"), tw = c.measureText(tt).width + 8;
+      rr(c, x - tw / 2, y + R + 9, tw, 14, 7); c.fill(); c.fillStyle = "#fff"; c.fillText(tt, x - tw / 2 + 4, y + R + 20);
+    }
     // obličej: oči (mrkají), pusa (při mluvení se hýbe)
     const look = st === "thinking" ? -2 : 0, blink = (now % 4200) < 120 ? .15 : 1;
     c.fillStyle = "#1c2420";
@@ -174,6 +182,7 @@
     if (m.buddy != null) budOn(!!m.buddy);
     if (m.cur) { BUD.cx = m.cur[0]; BUD.cy = m.cur[1]; if (!BUD.seen) { BUD.seen = true; BUD.x = BUD.cx + 22; BUD.y = BUD.cy + 24; } }
     if (m.jobs != null) BUD.jobs = m.jobs;
+    if (m.timer !== undefined) BUD.timer = m.timer;
     if (m.say) { BUD.say = m.say; BUD.sayT = performance.now() + 5000; }
     if (m.st) BUD.st = m.st === "off" ? "" : m.st;
     if (m.subs != null) subsOn = !!m.subs;
